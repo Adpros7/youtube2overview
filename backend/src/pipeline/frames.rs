@@ -66,7 +66,7 @@ fn chapter_of(chapters: &[Chapter], t: f64) -> Option<String> {
 
 /// Compute the timestamps to sample given the strategy.
 fn timestamps(settings: &Settings, chapters: &[Chapter], duration: f64) -> Vec<f64> {
-    let n = settings.max_frames().max(1) as usize;
+    let n = settings.frame_sample_count(duration).max(1);
     let dur = if duration > 0.0 { duration } else { 0.0 };
 
     match settings.frame_strategy {
@@ -114,7 +114,7 @@ pub async fn extract(
     duration: f64,
     work_dir: &Path,
 ) -> anyhow::Result<Vec<Frame>> {
-    if settings.max_frames() == 0 {
+    if settings.frame_sample_count(duration) == 0 {
         return Ok(Vec::new());
     }
     let ffmpeg = tools::ffmpeg()?;
@@ -201,7 +201,7 @@ async fn scene_change(
     work_dir: &Path,
 ) -> anyhow::Result<Vec<Frame>> {
     let pattern = work_dir.join("scene_%03d.jpg");
-    let n = settings.max_frames();
+    let n = settings.frame_sample_count(duration);
     // Select frames whose scene score exceeds a threshold, cap at N.
     let status = Command::new(ffmpeg)
         .arg("-nostdin")

@@ -94,7 +94,9 @@ pub struct Settings {
 
     // ---- Frames / vision ----
     pub include_visual: bool,
-    pub max_frames: u32,
+    /// Number of visual samples to send to the vision model.
+    /// `-1` = auto by duration, `0` = disabled, positive values = explicit cap.
+    pub max_frames: i32,
     pub frame_strategy: FrameStrategy,
 
     // ---- Overview ----
@@ -125,7 +127,7 @@ impl Default for Settings {
             max_comments: 20,
             comment_sort: CommentSort::Top,
             include_visual: true,
-            max_frames: 8,
+            max_frames: -1,
             frame_strategy: FrameStrategy::Even,
             overview_length: OverviewLength::Standard,
             overview_style: "neutral, informative".to_string(),
@@ -141,7 +143,16 @@ impl Settings {
     pub fn max_comments(&self) -> u32 {
         self.max_comments.clamp(0, 200)
     }
-    pub fn max_frames(&self) -> u32 {
-        self.max_frames.clamp(0, 32)
+    pub fn frame_sample_count(&self, duration: f64) -> usize {
+        if self.max_frames < 0 {
+            if duration <= 0.0 {
+                return 8;
+            }
+            // Automatic mode covers the whole media with roughly one sample every
+            // 30 seconds, while keeping the vision prompt bounded.
+            ((duration / 30.0).ceil() as usize).clamp(8, 32)
+        } else {
+            self.max_frames.clamp(0, 32) as usize
+        }
     }
 }

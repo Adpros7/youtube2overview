@@ -13,6 +13,8 @@ use crate::tools;
 pub struct ProbeResult {
     pub meta: VideoMeta,
     pub chapters: Vec<Chapter>,
+    pub has_audio: bool,
+    pub has_video: bool,
 }
 
 /// Probe a local audio/video file for duration, title, and embedded chapters.
@@ -24,6 +26,7 @@ pub async fn meta(file: &Path) -> anyhow::Result<ProbeResult> {
         .arg("-print_format")
         .arg("json")
         .arg("-show_format")
+        .arg("-show_streams")
         .arg("-show_chapters")
         .arg(file)
         .output()
@@ -58,11 +61,37 @@ pub async fn meta(file: &Path) -> anyhow::Result<ProbeResult> {
         title = stem;
     }
 
-    let duration = format
+    let format_duration = format
         .get("duration")
         .and_then(|d| d.as_str())
         .and_then(|d| d.parse::<f64>().ok())
         .unwrap_or(0.0);
+    let streams = v
+        .get("streams")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let has_audio = streams.iter().any(|s| {
+        s.get("codec_type")
+            .and_then(|t| t.as_str())
+            .map(|t| t == "audio")
+            .unwrap_or(false)
+    });
+    let has_video = streams.iter().any(|s| {
+        s.get("codec_type")
+            .and_then(|t| t.as_str())
+            .map(|t| t == "video")
+            .unwrap_or(false)
+    });
+    let stream_duration = streams
+        .iter()
+        .filter_map(|s| {
+            s.get("duration")
+                .and_then(|d| d.as_str())
+                .and_then(|d| d.parse::<f64>().ok())
+        })
+        .fold(0.0, f64::max);
+    let duration = format_duration.max(stream_duration);
 
     let meta = VideoMeta {
         title,
@@ -101,5 +130,10 @@ pub async fn meta(file: &Path) -> anyhow::Result<ProbeResult> {
         })
         .unwrap_or_default();
 
-    Ok(ProbeResult { meta, chapters })
+    Ok(ProbeResult {
+        meta,
+        chapters,
+        has_audio,
+        has_video,
+    })
 }

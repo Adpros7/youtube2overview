@@ -49,7 +49,7 @@ struct Settings: Codable, Equatable {
     var commentSort: CommentSort = .top
 
     var includeVisual = true
-    var maxFrames: Int = 8
+    var maxFrames: Int = -1
     var frameStrategy: FrameStrategy = .even
 
     var overviewLength: OverviewLength = .standard
@@ -93,6 +93,12 @@ struct Comment: Codable, Equatable, Identifiable {
     var id: String { author + String(text.prefix(16)) }
 }
 
+struct Cue: Codable, Equatable, Identifiable {
+    var start: Double = 0
+    var text = ""
+    var id: String { "\(start)-\(text.prefix(16))" }
+}
+
 struct OutputSection: Codable, Equatable, Identifiable {
     var id: String
     var title: String
@@ -109,6 +115,7 @@ struct JobData: Codable, Equatable {
     var meta = VideoMeta()
     var chapters: [Chapter] = []
     var comments: [Comment] = []
+    var cues: [Cue] = []
     var aiOverview = ""
     var visualOverview = ""
     var frameCount = 0

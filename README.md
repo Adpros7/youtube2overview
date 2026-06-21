@@ -39,12 +39,12 @@ Everything runs locally. No API keys. No cloud.
 ## Use it
 
 1. Open the app (or mount `dist/yt2overview.dmg` and drag to Applications).
-2. On first launch it provisions the model runtime (`rapid-mlx[vision]`) into
+2. On first launch it provisions the model runtime (`rapid-mlx[vision]` + `mlx-whisper`) into
    `~/Library/Application Support/yt2overview/venv` — one-time, needs network.
 3. Paste a media link, pick one or more local files, or drag files onto the input. The backend:
    - uses yt-dlp for web media metadata, chapters, top-N comments, and captions when available,
    - uses ffprobe/ffmpeg for local audio/video files such as `.m4a`, `.mp4`, `.mp3`, `.mov`, and `.wav`,
-   - transcribes local media with embedded captions first, then mlx-whisper when needed,
+   - transcribes local media with embedded captions first, then normalized local audio via mlx-whisper when needed,
    - processes multiple added files through the local queue and saves each completed result to History,
    - extracts keyframes from video sources when visual overview is enabled,
    - reuses a running/cached **Gemma 4** server or serves one on a free port (with `--mllm`
@@ -53,7 +53,7 @@ Everything runs locally. No API keys. No cloud.
 4. Toggle **Readable / AI-optimized**, **Copy all**, or copy any single section.
 
 Open **Settings** (⚙️ / ⌘,) for granular control: model + quant, temperature, max tokens, server
-port, comment count/sort, frame count/strategy, overview length/style/language, transcript
+port, comment count/sort, frame sampling (`-1` = Auto) and strategy, overview length/style/language, transcript
 timestamps, and which sections to include.
 
 **History** (🕘 / ⌘Y): every generation is saved to

@@ -66,6 +66,8 @@ async fn run_inner(
     // avoid extra yt-dlp extractions).
     let mut stream_url: Option<String> = None;
     let mut caption: Option<ytdlp::CaptionRef> = None;
+    let mut local_has_audio = true;
+    let mut local_has_video = true;
 
     // --- Stage: fetch metadata, chapters, comments ---
     reporter
@@ -82,6 +84,8 @@ async fn run_inner(
         }
         Source::Local(path) => {
             let probed = probe::meta(path).await?;
+            local_has_audio = probed.has_audio;
+            local_has_video = probed.has_video;
             data.meta = probed.meta;
             data.chapters = probed.chapters;
             // No comments for local files.
@@ -121,6 +125,9 @@ async fn run_inner(
                 reporter
                     .stage("transcript", "Transcribing audio (local)…", 0.22)
                     .await;
+                if !local_has_audio {
+                    tracing::warn!("local file has no audio stream; checking subtitles only");
+                }
                 match transcribe::local(path, settings, work.path()).await {
                     Ok(g) => g,
                     Err(e) => {
@@ -139,7 +146,10 @@ async fn run_inner(
     }
 
     // --- Stage: keyframes for the visual overview ---
-    if settings.include_visual && settings.max_frames() > 0 {
+    if settings.include_visual
+        && local_has_video
+        && settings.frame_sample_count(data.meta.duration) > 0
+    {
         reporter.stage("frames", "Extracting keyframes…", 0.4).await;
         match frames::extract(
             &source,

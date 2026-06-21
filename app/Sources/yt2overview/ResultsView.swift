@@ -41,7 +41,10 @@ struct ResultsView: View {
                     HStack(spacing: 10) {
                         Label(result.data.meta.channel, systemImage: "person.crop.circle")
                         if result.data.frameCount > 0 {
-                            Label("\(result.data.frameCount) frames", systemImage: "photo.stack")
+                            Label("\(result.data.frameCount) sampled frames", systemImage: "photo.stack")
+                        }
+                        if !result.data.cues.isEmpty {
+                            Label("\(result.data.cues.count) transcript cues", systemImage: "captions.bubble")
                         }
                         if !result.data.modelUsed.isEmpty {
                             Label(shortModel(result.data.modelUsed), systemImage: "cpu")

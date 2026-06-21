@@ -84,6 +84,7 @@ async fn whisper(
     work_dir: &Path,
 ) -> anyhow::Result<(Vec<Cue>, String)> {
     let bin = tools::mlx_whisper()?;
+    let audio = extract_audio(file, work_dir).await?;
 
     // mlx-whisper's audio loader shells out to `ffmpeg`; make sure our bundled copy is
     // on PATH for the child process.
@@ -97,7 +98,7 @@ async fn whisper(
     }
 
     let out = Command::new(&bin)
-        .arg(file)
+        .arg(&audio)
         .arg("--model")
         .arg(&settings.whisper_model)
         .arg("--task")
@@ -118,7 +119,10 @@ async fn whisper(
     }
 
     // mlx-whisper writes `<stem>.json` into the output dir; fall back to scanning.
-    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("audio");
+    let stem = audio
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("audio");
     let mut json_path = work_dir.join(format!("{stem}.json"));
     if !json_path.exists() {
         json_path = newest_json(work_dir).ok_or_else(|| anyhow!("whisper produced no output"))?;
@@ -147,6 +151,37 @@ async fn whisper(
         }
     }
     Ok((cues, lang))
+}
+
+/// Normalize any local audio/video container to a mono 16 kHz WAV before ASR.
+async fn extract_audio(file: &Path, work_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
+    let ffmpeg = tools::ffmpeg()?;
+    let out = work_dir.join("audio.wav");
+    let result = Command::new(&ffmpeg)
+        .arg("-nostdin")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-i")
+        .arg(file)
+        .arg("-vn")
+        .arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("16000")
+        .arg("-f")
+        .arg("wav")
+        .arg("-y")
+        .arg(&out)
+        .output()
+        .await
+        .context("failed to launch ffmpeg for audio extraction")?;
+    if !result.status.success() {
+        return Err(anyhow!(
+            "audio extraction failed: {}",
+            String::from_utf8_lossy(&result.stderr).trim()
+        ));
+    }
+    Ok(out)
 }
 
 fn newest_json(dir: &Path) -> Option<std::path::PathBuf> {

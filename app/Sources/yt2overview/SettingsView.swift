@@ -104,7 +104,13 @@ struct SettingsView: View {
         SettingsGroup("Visual overview", icon: "photo.stack") {
             Toggle("Include visual overview", isOn: $model.settings.includeVisual)
             if model.settings.includeVisual {
-                stepperRow("Max frames", value: $model.settings.maxFrames, range: 0...32, step: 1)
+                stepperRow(
+                    "Frame samples (-1 = auto)",
+                    value: $model.settings.maxFrames,
+                    range: -1...32,
+                    step: 1,
+                    display: { $0 < 0 ? "Auto" : "\($0)" }
+                )
                 pickerRow("Frame selection", selection: $model.settings.frameStrategy, options: FrameStrategy.allCases) { $0.label }
             }
         }
@@ -180,12 +186,18 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func stepperRow(_ title: String, value: Binding<Int>, range: ClosedRange<Int>, step: Int) -> some View {
+    private func stepperRow(
+        _ title: String,
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        step: Int,
+        display: @escaping (Int) -> String = { "\($0)" }
+    ) -> some View {
         HStack {
             Text(title).settingLabel()
             Spacer()
             Stepper(value: value, in: range, step: step) {
-                Text("\(value.wrappedValue)")
+                Text(display(value.wrappedValue))
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     .frame(minWidth: 40, alignment: .trailing)
             }

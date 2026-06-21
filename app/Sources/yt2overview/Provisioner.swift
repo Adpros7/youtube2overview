@@ -27,6 +27,16 @@ final class Provisioner {
         return FileManager.default.isExecutableFile(atPath: bin) ? bin : nil
     }
 
+    /// Path to the provisioned `mlx_whisper`, if the venv exists.
+    nonisolated static func provisionedWhisperBin() -> String? {
+        let bin = venvDir.appendingPathComponent("bin/mlx_whisper").path
+        return FileManager.default.isExecutableFile(atPath: bin) ? bin : nil
+    }
+
+    nonisolated static func provisionedRuntimeReady() -> Bool {
+        provisionedMlxBin() != nil && provisionedWhisperBin() != nil
+    }
+
     var isReady: Bool { state == .ready }
 
     /// Ensure a vision-capable rapid-mlx is available. Installs it on first run.
@@ -37,10 +47,15 @@ final class Provisioner {
         // Dev shortcut: an explicit rapid-mlx provided via env (e.g. a prebuilt venv).
         if let mlx = ProcessInfo.processInfo.environment["YT2O_MLX_BIN"],
            FileManager.default.isExecutableFile(atPath: mlx) {
-            state = .ready
-            return
+            let whisper = URL(fileURLWithPath: mlx)
+                .deletingLastPathComponent()
+                .appendingPathComponent("mlx_whisper")
+            if FileManager.default.isExecutableFile(atPath: whisper.path) {
+                state = .ready
+                return
+            }
         }
-        if Self.provisionedMlxBin() != nil {
+        if Self.provisionedRuntimeReady() {
             state = .ready
             return
         }
@@ -54,8 +69,10 @@ final class Provisioner {
             try FileManager.default.createDirectory(
                 at: Self.venvDir.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-            state = .installing("Creating Python environment…")
-            try await run(uv, ["venv", Self.venvDir.path, "--python", "3.12", "--seed"])
+            if Self.provisionedMlxBin() == nil && Self.provisionedWhisperBin() == nil {
+                state = .installing("Creating Python environment…")
+                try await run(uv, ["venv", Self.venvDir.path, "--python", "3.12", "--seed"])
+            }
 
             state = .installing("Installing rapid-mlx (vision) + whisper… this can take a few minutes")
             try await run(
@@ -69,10 +86,10 @@ final class Provisioner {
                     }
                 })
 
-            if Self.provisionedMlxBin() != nil {
+            if Self.provisionedRuntimeReady() {
                 state = .ready
             } else {
-                state = .failed("Install finished but rapid-mlx was not found.")
+                state = .failed("Install finished but rapid-mlx or mlx_whisper was not found.")
             }
         } catch {
             state = .failed(error.localizedDescription)
