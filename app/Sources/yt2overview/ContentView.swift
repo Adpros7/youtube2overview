@@ -6,6 +6,16 @@ struct ContentView: View {
     @State private var showImporter = false
     @State private var dropTargeted = false
 
+    private var mediaContentTypes: [UTType] {
+        var types: [UTType] = [.movie, .video, .audio]
+        for ext in ["mp4", "m4v", "mov", "m4a", "mp3", "wav", "aiff", "aac", "flac", "webm", "mkv", "avi"] {
+            if let type = UTType(filenameExtension: ext) {
+                types.append(type)
+            }
+        }
+        return types
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -111,7 +121,7 @@ struct ContentView: View {
     private var inputCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Paste a media link — or upload / drop audio and video files")
+                Text("Paste a media link — or add audio/video files")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
@@ -147,8 +157,17 @@ struct ContentView: View {
                 )
                 if let name = model.localFileLabel {
                     HStack(spacing: 6) {
-                        Image(systemName: "film").foregroundStyle(Theme.violet)
+                        Image(systemName: "waveform").foregroundStyle(Theme.violet)
                         Text(name).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                }
+                if let batch = model.batchLabel {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.stack.3d.up").foregroundStyle(Theme.accent)
+                        Text(batch).lineLimit(1)
                         Spacer()
                     }
                     .font(.system(size: 11))
@@ -161,21 +180,35 @@ struct ContentView: View {
         }
         .fileImporter(
             isPresented: $showImporter,
-            allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie, .video, .audio],
-            allowsMultipleSelection: false
+            allowedContentTypes: mediaContentTypes,
+            allowsMultipleSelection: true
         ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                model.useLocalFile(url)
+            if case .success(let urls) = result {
+                model.useLocalFiles(urls)
             }
         }
     }
 
-    /// Accept a dropped audio/video file URL and start a job.
+    /// Accept dropped audio/video file URLs and add them to the processing queue.
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url else { return }
-            Task { @MainActor in model.useLocalFile(url) }
+        let fileProviders = providers.filter { $0.canLoadObject(ofClass: URL.self) }
+        guard !fileProviders.isEmpty else { return false }
+
+        let accumulator = URLDropAccumulator()
+        let group = DispatchGroup()
+
+        for provider in fileProviders {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url {
+                    accumulator.append(url)
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            model.useLocalFiles(accumulator.snapshot())
         }
         return true
     }
@@ -212,6 +245,23 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+}
+
+private final class URLDropAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [URL] = []
+
+    func append(_ url: URL) {
+        lock.lock()
+        urls.append(url)
+        lock.unlock()
+    }
+
+    func snapshot() -> [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls
     }
 }
 

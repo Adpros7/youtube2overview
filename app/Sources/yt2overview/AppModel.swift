@@ -20,6 +20,9 @@ final class AppModel {
     var result: JobResult?
     var cachedModels: [CachedModel] = []
     var showSettings = false
+    var pendingLocalFiles: [URL] = []
+    var batchTotal = 0
+    var batchCompleted = 0
 
     /// "human" or "ai"
     var outputMode: String = "human"
@@ -66,16 +69,44 @@ final class AppModel {
     func generate() {
         let target = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !target.isEmpty, !isBusy else { return }
+        pendingLocalFiles.removeAll()
+        batchTotal = 0
+        batchCompleted = 0
+        startJob(target, advancesBatch: false)
+    }
+
+    private func startJob(_ target: String, advancesBatch: Bool) {
         result = nil
         phase = .starting
-        Task { await runJob(target) }
+        Task { await runJob(target, advancesBatch: advancesBatch) }
     }
 
     /// Use a locally-picked/dropped audio or video file as the source and start a job.
     func useLocalFile(_ fileURL: URL) {
-        guard !isBusy else { return }
+        useLocalFiles([fileURL])
+    }
+
+    /// Add one or more locally-picked/dropped media files to the processing queue.
+    func useLocalFiles(_ fileURLs: [URL]) {
+        let files = fileURLs.filter { $0.isFileURL }
+        guard !files.isEmpty else { return }
+
+        if !isBusy && pendingLocalFiles.isEmpty {
+            batchCompleted = 0
+            batchTotal = files.count
+        } else {
+            batchTotal += files.count
+        }
+
+        pendingLocalFiles.append(contentsOf: files)
+        startNextQueuedLocalFile()
+    }
+
+    private func startNextQueuedLocalFile() {
+        guard !isBusy, !pendingLocalFiles.isEmpty else { return }
+        let fileURL = pendingLocalFiles.removeFirst()
         url = fileURL.path
-        generate()
+        startJob(fileURL.path, advancesBatch: true)
     }
 
     /// Filename to show when the current input is a local file (vs. a web URL).
@@ -86,7 +117,25 @@ final class AppModel {
         return (t as NSString).lastPathComponent
     }
 
-    private func runJob(_ target: String) async {
+    var batchLabel: String? {
+        guard batchTotal > 1 else { return nil }
+        if isBusy {
+            let current = min(batchCompleted + 1, batchTotal)
+            let remaining = max(batchTotal - current, 0)
+            return remaining == 0
+                ? "Processing \(current) of \(batchTotal)"
+                : "Processing \(current) of \(batchTotal) · \(remaining) queued"
+        }
+        if batchCompleted >= batchTotal {
+            return "Processed \(batchCompleted) files"
+        }
+        if !pendingLocalFiles.isEmpty {
+            return "\(pendingLocalFiles.count) files queued"
+        }
+        return nil
+    }
+
+    private func runJob(_ target: String, advancesBatch: Bool) async {
         do {
             if backend.baseURL == nil { try await backend.start() }
             // Make sure the model runtime is installed before a job needs it.
@@ -111,6 +160,13 @@ final class AppModel {
         } catch {
             phase = .failed(error.localizedDescription)
         }
+
+        if case .done = phase {
+            if advancesBatch {
+                batchCompleted += 1
+            }
+            startNextQueuedLocalFile()
+        }
     }
 
     func currentOutput() -> String {
@@ -127,6 +183,9 @@ final class AppModel {
         url = ""
         result = nil
         phase = .idle
+        pendingLocalFiles.removeAll()
+        batchTotal = 0
+        batchCompleted = 0
     }
 
     func pasteURL() {
