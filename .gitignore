@@ -1,0 +1,24 @@
+# Rust
+/backend/target/
+**/*.rs.bk
+
+# Swift / SPM
+/app/.build/
+/app/.swiftpm/
+*.xcodeproj
+DerivedData/
+
+# Build artifacts
+/build/
+/dist/
+*.dmg
+yt2overview.app/
+
+# Bundled third-party binaries (fetched/copied at package time)
+/resources/bin/
+
+# macOS
+.DS_Store
+
+# Python venv created at first run (dev)
+.venv/
