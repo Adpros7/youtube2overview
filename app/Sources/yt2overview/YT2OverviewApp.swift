@@ -3,16 +3,20 @@ import SwiftUI
 @main
 struct YT2OverviewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var model = AppModel()
 
     var body: some Scene {
         WindowGroup("yt2overview") {
-            ContentView()
+            ContentView(model: model)
                 .frame(minWidth: 900, minHeight: 640)
                 .background(MicaBackground().ignoresSafeArea())
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1040, height: 760)
+        .commands {
+            AppCommands(model: model)
+        }
     }
 }
 

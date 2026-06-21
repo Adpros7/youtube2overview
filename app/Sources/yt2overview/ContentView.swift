@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var model = AppModel()
+    @Bindable var model: AppModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +21,9 @@ struct ContentView: View {
         .task { await model.bootIfNeeded() }
         .sheet(isPresented: $model.showSettings) {
             SettingsView(model: model)
+        }
+        .sheet(isPresented: $model.showHistory) {
+            HistoryView(model: model)
         }
     }
 
@@ -44,12 +47,19 @@ struct ContentView: View {
             }
             Spacer()
             Button {
+                model.showHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath").font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.glass)
+            .help("History (⌘Y)")
+            Button {
                 model.showSettings = true
             } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 15, weight: .semibold))
             }
             .buttonStyle(.glass)
-            .help("Settings")
+            .help("Settings (⌘,)")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

@@ -50,9 +50,17 @@ Everything runs locally. No API keys. No cloud.
    - assembles the **Readable** and **AI-optimized** outputs.
 4. Toggle **Readable / AI-optimized**, **Copy all**, or copy any single section.
 
-Open **Settings** (⚙️) for granular control: model + quant, temperature, max tokens, server
+Open **Settings** (⚙️ / ⌘,) for granular control: model + quant, temperature, max tokens, server
 port, comment count/sort, frame count/strategy, overview length/style/language, transcript
 timestamps, and which sections to include.
+
+**History** (🕘 / ⌘Y): every generation is saved to
+`~/Library/Application Support/yt2overview/history.json`; reopen any past result from the History
+panel or the **History** menu.
+
+**Menu bar & shortcuts:** full native menus — *File* (Generate ⌘↵, Paste URL & Generate ⌘⇧V,
+Clear ⌘⌫), *Overview* (Copy All ⌘⇧C, Copy AI payload ⌘⌥C, Readable ⌘1 / AI-optimized ⌘2),
+*History* (⌘Y + recents), plus About and Settings.
 
 ## Build from source
 

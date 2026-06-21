@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftUI
@@ -24,8 +25,12 @@ final class AppModel {
     var outputMode: String = "human"
 
     let provisioner = Provisioner()
+    let history = HistoryStore()
+    var showHistory = false
     private let backend = BackendClient()
     private var started = false
+
+    var hasResult: Bool { result != nil }
 
     var isBusy: Bool {
         switch phase {
@@ -84,6 +89,7 @@ final class AppModel {
             if let res = try await backend.result(jobId: jobId) {
                 result = res
                 phase = .done
+                history.add(url: target, result: res)
             } else {
                 phase = .failed("No result produced.")
             }
@@ -95,5 +101,31 @@ final class AppModel {
     func currentOutput() -> String {
         guard let r = result else { return "" }
         return outputMode == "ai" ? r.outputs.aiPayload : r.outputs.humanMarkdown
+    }
+
+    // MARK: - Menu actions
+
+    func copyCurrent() { Clipboard.copy(currentOutput()) }
+    func copyAI() { if let r = result { Clipboard.copy(r.outputs.aiPayload) } }
+
+    func clear() {
+        url = ""
+        result = nil
+        phase = .idle
+    }
+
+    func pasteURL() {
+        if let s = NSPasteboard.general.string(forType: .string) {
+            url = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// Load a previously-generated result back into the main view.
+    func load(_ entry: HistoryEntry) {
+        url = entry.url
+        result = entry.result
+        outputMode = "human"
+        phase = .done
+        showHistory = false
     }
 }
