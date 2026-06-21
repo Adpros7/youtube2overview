@@ -1,6 +1,7 @@
 //! Job pipeline orchestration. Individual stages live in submodules and are wired
 //! up across Phases 2–6.
 
+pub mod frames;
 pub mod ytdlp;
 
 use std::sync::Arc;
@@ -77,7 +78,39 @@ async fn run_inner(
             .await;
     }
 
-    // Frames (Phase 3), model overviews (Phase 5) and final assembly (Phase 6)
+    // --- Stage: keyframes for the visual overview ---
+    if settings.include_visual && settings.max_frames() > 0 {
+        reporter.stage("frames", "Extracting keyframes…", 0.4).await;
+        match frames::extract(
+            &req.url,
+            settings,
+            &data.chapters,
+            data.meta.duration,
+            work.path(),
+        )
+        .await
+        {
+            Ok(frames) => {
+                data.frame_count = frames.len();
+                data.frames = frames;
+                reporter
+                    .stage(
+                        "frames",
+                        format!("Extracted {} frames", data.frame_count),
+                        0.5,
+                    )
+                    .await;
+            }
+            Err(e) => {
+                tracing::warn!("frame extraction failed: {e:#}");
+                reporter
+                    .stage("frames", "Skipped frames (unavailable)", 0.5)
+                    .await;
+            }
+        }
+    }
+
+    // Model overviews (Phase 5) and final assembly (Phase 6)
     // are layered in next. For now emit a basic human-readable dump.
     let outputs = Outputs {
         human_markdown: basic_markdown(&data),

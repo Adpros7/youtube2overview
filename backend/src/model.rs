@@ -69,6 +69,8 @@ pub struct JobData {
     pub chapters: Vec<Chapter>,
     pub comments: Vec<Comment>,
     pub cues: Vec<Cue>,
+    /// Extracted keyframes (image paths are kept in-process, not serialized).
+    pub frames: Vec<Frame>,
     pub transcript_lang: String,
     /// Model-generated text overview.
     pub ai_overview: String,
