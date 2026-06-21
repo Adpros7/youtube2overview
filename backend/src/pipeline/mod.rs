@@ -1,9 +1,10 @@
 //! Job pipeline orchestration. Individual stages live in submodules and are wired
 //! up across Phases 2–6.
 
+pub mod ytdlp;
+
 use std::sync::Arc;
 
-use crate::config::Settings;
 use crate::model::{JobData, JobResult, Outputs, ProcessRequest};
 use crate::state::{Job, ProgressEvent};
 
@@ -46,19 +47,79 @@ async fn run_inner(
     reporter: &Reporter,
     req: &ProcessRequest,
 ) -> anyhow::Result<(JobData, Outputs)> {
-    let _settings: &Settings = &req.settings;
-    reporter.stage("start", "Starting…", 0.02).await;
+    let settings = &req.settings;
+    let work = tempfile::tempdir().map_err(|e| anyhow::anyhow!("tempdir: {e}"))?;
+    let mut data = JobData::default();
 
-    // Phase 1 placeholder: real stages (fetch, frames, model, assemble) are wired in
-    // Phases 2–6. For now produce an empty-but-valid result so the SSE + result flow
-    // can be exercised end to end.
-    let data = JobData::default();
+    // --- Stage: fetch metadata, chapters, comments ---
+    reporter.stage("fetch", "Fetching video metadata…", 0.05).await;
+    let dump = ytdlp::dump(&req.url, settings).await?;
+    data.meta = dump.meta;
+    data.chapters = dump.chapters;
+    data.comments = dump.comments;
+    reporter
+        .stage(
+            "fetch",
+            format!("Got “{}”", truncate(&data.meta.title, 60)),
+            0.18,
+        )
+        .await;
+
+    // --- Stage: transcript ---
+    if settings.include_transcript || settings.sections.ai_overview {
+        reporter.stage("transcript", "Fetching transcript…", 0.22).await;
+        let (cues, lang) = ytdlp::transcript(&req.url, settings, work.path()).await?;
+        let n = cues.len();
+        data.cues = cues;
+        data.transcript_lang = lang;
+        reporter
+            .stage("transcript", format!("Transcript: {n} cues"), 0.35)
+            .await;
+    }
+
+    // Frames (Phase 3), model overviews (Phase 5) and final assembly (Phase 6)
+    // are layered in next. For now emit a basic human-readable dump.
     let outputs = Outputs {
-        human_markdown: format!("# (pipeline not yet wired)\n\nURL: {}\n", req.url),
+        human_markdown: basic_markdown(&data),
         ai_payload: String::new(),
         sections: Vec::new(),
     };
 
     reporter.stage("done", "Done", 1.0).await;
     Ok((data, outputs))
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(n).collect();
+        format!("{t}…")
+    }
+}
+
+/// Temporary assembly until Phase 6 replaces it.
+fn basic_markdown(data: &JobData) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", data.meta.title));
+    out.push_str(&format!("**Channel:** {}\n\n", data.meta.channel));
+    if !data.chapters.is_empty() {
+        out.push_str("## Chapters\n\n");
+        for c in &data.chapters {
+            out.push_str(&format!("- {} ({:.0}s)\n", c.title, c.start));
+        }
+        out.push('\n');
+    }
+    if !data.comments.is_empty() {
+        out.push_str(&format!("## Top {} comments\n\n", data.comments.len()));
+        for c in &data.comments {
+            out.push_str(&format!("- **{}** ({}): {}\n", c.author, c.likes, c.text));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("## Transcript ({} cues)\n\n", data.cues.len()));
+    for cue in &data.cues {
+        out.push_str(&format!("[{:.0}s] {}\n", cue.start, cue.text));
+    }
+    out
 }

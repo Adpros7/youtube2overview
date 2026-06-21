@@ -10,6 +10,7 @@ mod error;
 mod model;
 mod pipeline;
 mod state;
+mod tools;
 
 use std::net::{Ipv4Addr, SocketAddr};
 
