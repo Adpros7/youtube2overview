@@ -1,6 +1,7 @@
 //! Job pipeline orchestration. Individual stages live in submodules and are wired
 //! up across Phases 2–6.
 
+pub mod assemble;
 pub mod frames;
 pub mod infer;
 pub mod ytdlp;
@@ -157,12 +158,7 @@ async fn run_inner(
     }
 
     reporter.stage("assemble", "Assembling output…", 0.95).await;
-    // Final assembly (Phase 6) replaces this basic dump next.
-    let outputs = Outputs {
-        human_markdown: basic_markdown(&data),
-        ai_payload: String::new(),
-        sections: Vec::new(),
-    };
+    let outputs = assemble::assemble(&data, settings);
 
     reporter.stage("done", "Done", 1.0).await;
     Ok((data, outputs))
@@ -175,40 +171,4 @@ fn truncate(s: &str, n: usize) -> String {
         let t: String = s.chars().take(n).collect();
         format!("{t}…")
     }
-}
-
-/// Temporary assembly until Phase 6 replaces it.
-fn basic_markdown(data: &JobData) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("# {}\n\n", data.meta.title));
-    out.push_str(&format!("**Channel:** {}\n\n", data.meta.channel));
-    if !data.ai_overview.is_empty() {
-        out.push_str("## AI Overview\n\n");
-        out.push_str(&data.ai_overview);
-        out.push_str("\n\n");
-    }
-    if !data.visual_overview.is_empty() {
-        out.push_str("## Visual Overview\n\n");
-        out.push_str(&data.visual_overview);
-        out.push_str("\n\n");
-    }
-    if !data.chapters.is_empty() {
-        out.push_str("## Chapters\n\n");
-        for c in &data.chapters {
-            out.push_str(&format!("- {} ({:.0}s)\n", c.title, c.start));
-        }
-        out.push('\n');
-    }
-    if !data.comments.is_empty() {
-        out.push_str(&format!("## Top {} comments\n\n", data.comments.len()));
-        for c in &data.comments {
-            out.push_str(&format!("- **{}** ({}): {}\n", c.author, c.likes, c.text));
-        }
-        out.push('\n');
-    }
-    out.push_str(&format!("## Transcript ({} cues)\n\n", data.cues.len()));
-    for cue in &data.cues {
-        out.push_str(&format!("[{:.0}s] {}\n", cue.start, cue.text));
-    }
-    out
 }
