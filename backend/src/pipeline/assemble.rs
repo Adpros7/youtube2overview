@@ -107,7 +107,7 @@ fn preamble(data: &JobData, settings: &Settings) -> String {
         parts.push("an AI-generated overview");
     }
     if settings.sections.visual_overview && !data.visual_overview.is_empty() {
-        parts.push("a description of the video's visuals");
+        parts.push("a description of the media's visuals");
     }
     if settings.sections.comments && !data.comments.is_empty() {
         parts.push("top viewer comments");
@@ -116,15 +116,15 @@ fn preamble(data: &JobData, settings: &Settings) -> String {
         parts.push("the full transcript");
     }
     let contents = if parts.is_empty() {
-        "video metadata".to_string()
+        "media metadata".to_string()
     } else {
         parts.join(", ")
     };
     format!(
-        "> **Instructions for AI:** The following is a structured export of a YouTube video \
+        "> **Instructions for AI:** The following is a structured export of a media source \
 \"{title}\" — it contains {contents}. Treat the transcript as the primary source of truth \
 about what was said, the visual overview as context for what was shown, and the comments as \
-audience reaction (not fact). When answering questions about this video, ground your answers \
+audience reaction (not fact). When answering questions about this media, ground your answers \
 in the transcript and cite chapter timestamps where helpful. Do not fabricate details that \
 are not present below.",
         title = data.meta.title,
@@ -194,7 +194,11 @@ fn build_human(data: &JobData, sections: &[OutputSection]) -> String {
     let mut s = String::new();
     s.push_str(&format!("# {}\n\n", data.meta.title));
     for sec in sections {
-        s.push_str(&format!("## {}\n\n{}\n", sec.title, sec.markdown.trim_end()));
+        s.push_str(&format!(
+            "## {}\n\n{}\n",
+            sec.title,
+            sec.markdown.trim_end()
+        ));
         s.push('\n');
     }
     s.trim_end().to_string()
@@ -208,7 +212,11 @@ fn build_ai(data: &JobData, settings: &Settings, sections: &[OutputSection]) -> 
     }
     s.push_str(&format!("# {}\n\n", data.meta.title));
     for sec in sections {
-        s.push_str(&format!("## {}\n\n{}\n\n", sec.title, sec.markdown.trim_end()));
+        s.push_str(&format!(
+            "## {}\n\n{}\n\n",
+            sec.title,
+            sec.markdown.trim_end()
+        ));
     }
     s.trim_end().to_string()
 }

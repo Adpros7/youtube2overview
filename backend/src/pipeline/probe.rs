@@ -1,4 +1,4 @@
-//! ffprobe metadata for locally-uploaded files (no yt-dlp / network).
+//! ffprobe metadata for locally-uploaded media files (no yt-dlp / network).
 
 use std::path::Path;
 
@@ -15,7 +15,7 @@ pub struct ProbeResult {
     pub chapters: Vec<Chapter>,
 }
 
-/// Probe a local media file for duration, title, and embedded chapters.
+/// Probe a local audio/video file for duration, title, and embedded chapters.
 pub async fn meta(file: &Path) -> anyhow::Result<ProbeResult> {
     let ffprobe = tools::ffprobe()?;
     let out = Command::new(&ffprobe)
@@ -51,7 +51,7 @@ pub async fn meta(file: &Path) -> anyhow::Result<ProbeResult> {
     let stem = file
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("Local video")
+        .unwrap_or("Local media")
         .to_string();
     let mut title = tag("title");
     if title.is_empty() {

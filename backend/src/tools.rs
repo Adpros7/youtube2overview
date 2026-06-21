@@ -55,7 +55,8 @@ pub fn mlx_whisper() -> anyhow::Result<PathBuf> {
             }
         }
     }
-    resolve("mlx_whisper").map_err(|_| anyhow!("mlx_whisper not found; provisioned via uv on first run"))
+    resolve("mlx_whisper")
+        .map_err(|_| anyhow!("mlx_whisper not found; provisioned via uv on first run"))
 }
 
 /// rapid-mlx resolution, re-evaluated on each call so a venv provisioned *after*

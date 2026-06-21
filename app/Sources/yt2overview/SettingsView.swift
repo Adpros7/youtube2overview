@@ -124,7 +124,7 @@ struct SettingsView: View {
                 TextField("mlx-community/whisper-large-v3-turbo", text: $model.settings.whisperModel)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 240)
             }
-            Text("Used to transcribe uploaded videos that have no captions.")
+            Text("Used to transcribe uploaded media that has no captions.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }

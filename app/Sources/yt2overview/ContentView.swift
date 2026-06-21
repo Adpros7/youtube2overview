@@ -45,7 +45,7 @@ struct ContentView: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text("yt2overview").font(.system(size: 16, weight: .bold))
-                Text("Local YouTube → AI-ready overview")
+                Text("Local media → AI-ready overview")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -111,7 +111,7 @@ struct ContentView: View {
     private var inputCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Paste a YouTube link — or upload / drop a video file")
+                Text("Paste a media link — or upload / drop audio and video files")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
@@ -127,7 +127,7 @@ struct ContentView: View {
                             .font(.system(size: 14, weight: .semibold))
                     }
                     .buttonStyle(.glass)
-                    .help("Upload a local video file")
+                    .help("Upload local audio or video files")
                     .disabled(model.isBusy)
                     Button {
                         model.generate()
@@ -170,7 +170,7 @@ struct ContentView: View {
         }
     }
 
-    /// Accept a dropped file URL (first video/audio file) and start a job.
+    /// Accept a dropped audio/video file URL and start a job.
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in

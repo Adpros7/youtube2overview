@@ -68,7 +68,9 @@ async fn run_inner(
     let mut caption: Option<ytdlp::CaptionRef> = None;
 
     // --- Stage: fetch metadata, chapters, comments ---
-    reporter.stage("fetch", "Fetching video metadata…", 0.05).await;
+    reporter
+        .stage("fetch", "Fetching media metadata…", 0.05)
+        .await;
     match &source {
         Source::YouTube(url) => {
             let dump = ytdlp::dump(url, settings).await?;
@@ -97,7 +99,9 @@ async fn run_inner(
     if settings.include_transcript || settings.sections.ai_overview {
         let (cues, lang) = match &source {
             Source::YouTube(url) => {
-                reporter.stage("transcript", "Fetching transcript…", 0.22).await;
+                reporter
+                    .stage("transcript", "Fetching transcript…", 0.22)
+                    .await;
                 // Prefer the caption URL from the dump (no second yt-dlp); fall back to
                 // the yt-dlp subtitle download if the direct fetch yields nothing.
                 let mut got: Option<(Vec<crate::model::Cue>, String)> = None;
@@ -218,9 +222,7 @@ async fn run_inner(
             }
         }
         if need_visual {
-            reporter
-                .stage("model", "Describing visuals…", 0.82)
-                .await;
+            reporter.stage("model", "Describing visuals…", 0.82).await;
             match infer::visual_overview(&endpoint, settings, &data.meta, &data.frames).await {
                 Ok(t) => data.visual_overview = t,
                 Err(e) => tracing::warn!("visual overview failed: {e:#}"),

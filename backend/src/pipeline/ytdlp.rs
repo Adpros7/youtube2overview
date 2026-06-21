@@ -59,15 +59,14 @@ pub async fn dump(url: &str, settings: &Settings) -> anyhow::Result<DumpResult> 
             CommentSort::New => "new",
         };
         // Fetch top-level comments only, capped at N, sorted as requested.
-        cmd.arg("--write-comments").arg("--extractor-args").arg(format!(
-            "youtube:max_comments={n},all,0,0;comment_sort={sort}"
-        ));
+        cmd.arg("--write-comments")
+            .arg("--extractor-args")
+            .arg(format!(
+                "youtube:max_comments={n},all,0,0;comment_sort={sort}"
+            ));
     }
 
-    let out = cmd
-        .output()
-        .await
-        .context("failed to launch yt-dlp")?;
+    let out = cmd.output().await.context("failed to launch yt-dlp")?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(anyhow!("yt-dlp dump failed: {}", err.trim()));
@@ -113,7 +112,10 @@ pub async fn dump(url: &str, settings: &Settings) -> anyhow::Result<DumpResult> 
                     author: s(c, "author"),
                     text: s(c, "text"),
                     likes: i(c, "like_count"),
-                    is_favorited: c.get("is_favorited").and_then(|b| b.as_bool()).unwrap_or(false),
+                    is_favorited: c
+                        .get("is_favorited")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false),
                 })
                 .collect()
         })
@@ -159,7 +161,9 @@ fn pick_caption(v: &Value, lang_pref: &str) -> Option<CaptionRef> {
             let keys: Vec<&String> = {
                 let exact: Vec<&String> = obj.keys().filter(|k| k.as_str() == want).collect();
                 if exact.is_empty() {
-                    obj.keys().filter(|k| k.starts_with(want.as_str())).collect()
+                    obj.keys()
+                        .filter(|k| k.starts_with(want.as_str()))
+                        .collect()
                 } else {
                     exact
                 }
@@ -393,10 +397,7 @@ pub(crate) fn parse_vtt(raw: &str) -> Vec<Cue> {
         let line = line.trim();
         if line.contains("-->") {
             flush(&mut cues, cur_start.take(), &mut buf);
-            cur_start = line
-                .split("-->")
-                .next()
-                .and_then(|t| parse_ts(t.trim()));
+            cur_start = line.split("-->").next().and_then(|t| parse_ts(t.trim()));
         } else if line.is_empty()
             || line == "WEBVTT"
             || line.starts_with("Kind:")
@@ -433,8 +434,16 @@ fn parse_ts(t: &str) -> Option<f64> {
     let t = t.split_whitespace().next().unwrap_or(t);
     let parts: Vec<&str> = t.split(':').collect();
     let (h, m, s) = match parts.as_slice() {
-        [h, m, s] => (h.parse::<f64>().ok()?, m.parse::<f64>().ok()?, s.replace(',', ".").parse::<f64>().ok()?),
-        [m, s] => (0.0, m.parse::<f64>().ok()?, s.replace(',', ".").parse::<f64>().ok()?),
+        [h, m, s] => (
+            h.parse::<f64>().ok()?,
+            m.parse::<f64>().ok()?,
+            s.replace(',', ".").parse::<f64>().ok()?,
+        ),
+        [m, s] => (
+            0.0,
+            m.parse::<f64>().ok()?,
+            s.replace(',', ".").parse::<f64>().ok()?,
+        ),
         _ => return None,
     };
     Some(h * 3600.0 + m * 60.0 + s)

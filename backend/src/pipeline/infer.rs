@@ -164,7 +164,7 @@ fn chapters_clause(chapters: &[Chapter]) -> String {
 ///
 /// Short transcripts go through a single call. Long ones are summarized map-reduce:
 /// each ~`CHUNK_CHARS` window is summarized on its own (bounded, fast prompts that
-/// cover the *whole* video), then a final pass synthesizes those into the overview.
+/// cover the *whole* media item), then a final pass synthesizes those into the overview.
 /// `progress(done, total)` is called as chunks complete (total == 1 for single-pass).
 pub async fn text_overview(
     endpoint: &Endpoint,
@@ -184,7 +184,7 @@ pub async fn text_overview(
         progress(0, 1);
         let transcript = transcript_text(cues, SINGLE_PASS_LIMIT);
         let prompt = format!(
-            "You are summarizing a YouTube video for someone who has not watched it. \
+            "You are summarizing a media source for someone who has not watched or listened to it. \
 Write a {len}, {style} overview based on the transcript. Capture the main topic, key \
 points, and conclusion. Do not invent facts not present in the transcript. Use clear \
 prose; you may use short bullet points for key takeaways.{lang}\n\n\
@@ -209,7 +209,7 @@ Title: {title}\nChannel: {channel}{chapters}\n\nTranscript:\n{transcript}",
     for (i, ch) in chunks.iter().enumerate() {
         progress(i, n);
         let prompt = format!(
-            "This is part {idx}/{n} of a video transcript, covering {a}–{b}. \
+            "This is part {idx}/{n} of a media transcript, covering {a}–{b}. \
 Summarize the key points and any conclusions in 3–5 sentences. Only state what is \
 present in the text; do not speculate.\n\nTranscript:\n{text}",
             idx = i + 1,
@@ -231,10 +231,10 @@ present in the text; do not speculate.\n\nTranscript:\n{text}",
     // Reduce: synthesize the segment summaries into the final overview.
     let joined = summaries.join("\n\n");
     let reduce_prompt = format!(
-        "You are summarizing a YouTube video for someone who has not watched it. Below are \
+        "You are summarizing a media source for someone who has not watched or listened to it. Below are \
 ordered summaries of consecutive segments of the transcript (in time order). Synthesize \
 them into a single {len}, {style} overview that captures the main topic, the key points as \
-the video progresses, and the conclusion. Do not invent facts not present below. Use clear \
+the media progresses, and the conclusion. Do not invent facts not present below. Use clear \
 prose; you may use short bullet points for key takeaways.{lang}\n\n\
 Title: {title}\nChannel: {channel}{chapters}\n\nSegment summaries:\n{joined}",
         len = target_words(&settings.overview_length),
@@ -260,8 +260,8 @@ pub async fn visual_overview(
     }
     let mut content: Vec<Value> = Vec::new();
     let instruction = format!(
-        "These are {n} keyframes sampled in chronological order from the video titled \
-\"{title}\". Describe what is shown visually across the video: setting, people, on-screen \
+        "These are {n} keyframes sampled in chronological order from the media titled \
+\"{title}\". Describe what is shown visually across it: setting, people, on-screen \
 text, actions, and how the visuals progress. Be concrete and {style}. Write {len}.{lang}",
         n = frames.len(),
         title = meta.title,

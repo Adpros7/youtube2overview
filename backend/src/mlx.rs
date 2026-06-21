@@ -281,10 +281,7 @@ async fn wait_ready(port: u16, status: &StatusFn<'_>) -> anyhow::Result<String> 
         }
         tick += 1;
         if tick % 3 == 0 {
-            status(format!(
-                "Loading model… ({}s)",
-                start.elapsed().as_secs()
-            ));
+            status(format!("Loading model… ({}s)", start.elapsed().as_secs()));
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }

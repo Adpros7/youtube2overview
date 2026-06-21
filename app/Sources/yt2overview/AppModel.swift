@@ -71,7 +71,7 @@ final class AppModel {
         Task { await runJob(target) }
     }
 
-    /// Use a locally-picked/dropped video file as the source and start a job.
+    /// Use a locally-picked/dropped audio or video file as the source and start a job.
     func useLocalFile(_ fileURL: URL) {
         guard !isBusy else { return }
         url = fileURL.path

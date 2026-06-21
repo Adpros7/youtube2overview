@@ -9,13 +9,14 @@ use crate::config::Settings;
 /// Incoming request body for `POST /process`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProcessRequest {
-    /// A YouTube URL or a local file path / `file://` URL — classified by [`Source`].
+    /// A web media URL or a local audio/video file path / `file://` URL,
+    /// classified by [`Source`].
     pub url: String,
     #[serde(default)]
     pub settings: Settings,
 }
 
-/// Where the video comes from. The same `url` field carries either a web URL or a
+/// Where the media comes from. The same `url` field carries either a web URL or a
 /// local path; `classify` decides which.
 #[derive(Debug, Clone)]
 pub enum Source {
@@ -24,8 +25,8 @@ pub enum Source {
 }
 
 impl Source {
-    /// Classify the request input: a local file (existing path or `file://` URL) vs.
-    /// a web URL handled by yt-dlp.
+    /// Classify the request input: a local media file (existing path or `file://`
+    /// URL) vs. a web URL handled by yt-dlp.
     pub fn classify(input: &str) -> Source {
         let trimmed = input.trim();
         if let Some(rest) = trimmed.strip_prefix("file://") {

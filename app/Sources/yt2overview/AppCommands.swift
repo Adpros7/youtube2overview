@@ -75,7 +75,7 @@ struct AppCommands: Commands {
             .applicationName: "yt2overview",
             .applicationVersion: "1.0",
             .credits: NSAttributedString(
-                string: "Local YouTube → AI-ready overview.\nTranscript · comments · visual + AI summary, generated on-device.",
+                string: "Local media → AI-ready overview.\nTranscript · comments · visual + AI summary, generated on-device.",
                 attributes: [.font: NSFont.systemFont(ofSize: 11)]
             ),
         ])
