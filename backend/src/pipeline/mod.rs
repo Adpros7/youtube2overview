@@ -6,6 +6,7 @@ pub mod ytdlp;
 
 use std::sync::Arc;
 
+use crate::mlx::MlxManager;
 use crate::model::{JobData, JobResult, Outputs, ProcessRequest};
 use crate::state::{Job, ProgressEvent};
 
@@ -26,9 +27,9 @@ impl Reporter {
 }
 
 /// Run the full pipeline for a job. Emits progress as it goes and stores the result.
-pub async fn run(job: Arc<Job>, req: ProcessRequest) {
+pub async fn run(job: Arc<Job>, mlx: Arc<MlxManager>, req: ProcessRequest) {
     let reporter = Reporter::new(job.clone());
-    match run_inner(&reporter, &req).await {
+    match run_inner(&reporter, &mlx, &req).await {
         Ok((data, outputs)) => {
             job.complete(JobResult {
                 data,
@@ -46,9 +47,11 @@ pub async fn run(job: Arc<Job>, req: ProcessRequest) {
 
 async fn run_inner(
     reporter: &Reporter,
+    mlx: &Arc<MlxManager>,
     req: &ProcessRequest,
 ) -> anyhow::Result<(JobData, Outputs)> {
     let settings = &req.settings;
+    let _ = mlx; // used by the model stage (Phase 5)
     let work = tempfile::tempdir().map_err(|e| anyhow::anyhow!("tempdir: {e}"))?;
     let mut data = JobData::default();
 

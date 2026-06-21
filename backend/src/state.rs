@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use serde::Serialize;
 use tokio::sync::{broadcast, Mutex};
 
+use crate::mlx::MlxManager;
 use crate::model::JobResult;
 
 /// A progress event streamed to the UI over SSE.
@@ -118,14 +119,18 @@ impl Job {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AppState {
     jobs: Arc<DashMap<String, Arc<Job>>>,
+    pub mlx: Arc<MlxManager>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        AppState::default()
+        AppState {
+            jobs: Arc::new(DashMap::new()),
+            mlx: MlxManager::new(),
+        }
     }
 
     pub fn create_job(&self) -> Arc<Job> {

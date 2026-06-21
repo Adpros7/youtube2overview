@@ -19,6 +19,7 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/models", get(models))
         .route("/process", post(process))
         .route("/events/:id", get(events))
         .route("/result/:id", get(result))
@@ -41,8 +42,15 @@ async fn process(
     }
     let job = state.create_job();
     let id = job.id.clone();
-    tokio::spawn(pipeline::run(job, ProcessRequest { url, ..req }));
+    let mlx = state.mlx.clone();
+    tokio::spawn(pipeline::run(job, mlx, ProcessRequest { url, ..req }));
     Ok(Json(json!({ "job_id": id })))
+}
+
+/// List locally-cached models (for the first-run picker / settings).
+async fn models() -> Json<serde_json::Value> {
+    let cached = crate::mlx::list_cached().await;
+    Json(json!({ "cached": cached }))
 }
 
 /// Server-sent events stream of progress for a job. Replays prior events to late subscribers.

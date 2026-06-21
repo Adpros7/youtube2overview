@@ -7,6 +7,7 @@
 mod api;
 mod config;
 mod error;
+mod mlx;
 mod model;
 mod pipeline;
 mod state;
