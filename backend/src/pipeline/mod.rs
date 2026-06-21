@@ -2,6 +2,7 @@
 //! up across Phases 2–6.
 
 pub mod frames;
+pub mod infer;
 pub mod ytdlp;
 
 use std::sync::Arc;
@@ -23,6 +24,9 @@ impl Reporter {
         self.job
             .emit(ProgressEvent::progress(stage, message, progress))
             .await;
+    }
+    pub fn clone_job(&self) -> Arc<Job> {
+        self.job.clone()
     }
 }
 
@@ -113,8 +117,47 @@ async fn run_inner(
         }
     }
 
-    // Model overviews (Phase 5) and final assembly (Phase 6)
-    // are layered in next. For now emit a basic human-readable dump.
+    // --- Stage: model overviews (text + visual) ---
+    let need_text = settings.sections.ai_overview && !data.cues.is_empty();
+    let need_visual = settings.sections.visual_overview && !data.frames.is_empty();
+    if need_text || need_visual {
+        reporter
+            .stage("model", "Preparing local model…", 0.55)
+            .await;
+        let reporter_status = reporter.clone_job();
+        let status = move |msg: String| {
+            let job = reporter_status.clone();
+            tokio::spawn(async move {
+                job.emit(ProgressEvent::progress("model", msg, 0.58)).await;
+            });
+        };
+        let endpoint = mlx
+            .ensure(&settings.model, settings.mlx_port, &status)
+            .await?;
+        data.model_used = endpoint.model_id.clone();
+
+        if need_text {
+            reporter.stage("model", "Writing AI overview…", 0.66).await;
+            match infer::text_overview(&endpoint, settings, &data.meta, &data.chapters, &data.cues)
+                .await
+            {
+                Ok(t) => data.ai_overview = t,
+                Err(e) => tracing::warn!("text overview failed: {e:#}"),
+            }
+        }
+        if need_visual {
+            reporter
+                .stage("model", "Describing visuals…", 0.82)
+                .await;
+            match infer::visual_overview(&endpoint, settings, &data.meta, &data.frames).await {
+                Ok(t) => data.visual_overview = t,
+                Err(e) => tracing::warn!("visual overview failed: {e:#}"),
+            }
+        }
+    }
+
+    reporter.stage("assemble", "Assembling output…", 0.95).await;
+    // Final assembly (Phase 6) replaces this basic dump next.
     let outputs = Outputs {
         human_markdown: basic_markdown(&data),
         ai_payload: String::new(),
@@ -139,6 +182,16 @@ fn basic_markdown(data: &JobData) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", data.meta.title));
     out.push_str(&format!("**Channel:** {}\n\n", data.meta.channel));
+    if !data.ai_overview.is_empty() {
+        out.push_str("## AI Overview\n\n");
+        out.push_str(&data.ai_overview);
+        out.push_str("\n\n");
+    }
+    if !data.visual_overview.is_empty() {
+        out.push_str("## Visual Overview\n\n");
+        out.push_str(&data.visual_overview);
+        out.push_str("\n\n");
+    }
     if !data.chapters.is_empty() {
         out.push_str("## Chapters\n\n");
         for c in &data.chapters {

@@ -233,15 +233,32 @@ fn free_port() -> anyhow::Result<u16> {
     Ok(l.local_addr()?.port())
 }
 
+/// Heuristic: does this model id name a vision-capable architecture?
+pub fn is_multimodal(model: &str) -> bool {
+    let low = model.to_ascii_lowercase();
+    low.contains("gemma-4")
+        || low.contains("gemma-3")
+        || low.contains("vl")
+        || low.contains("llava")
+        || low.contains("vision")
+        || low.contains("mllm")
+}
+
 async fn spawn_server(model: &str, port: u16) -> anyhow::Result<tokio::process::Child> {
     let bin = tools::rapid_mlx()?;
-    let child = tokio::process::Command::new(bin)
-        .arg("serve")
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.arg("serve")
         .arg(model)
         .arg("--port")
         .arg(port.to_string())
         .arg("--host")
-        .arg("127.0.0.1")
+        .arg("127.0.0.1");
+    // Force the multimodal/VLM path for vision-capable models (rapid-mlx otherwise
+    // routes Gemma 4 to its text-only loader, which rejects image inputs).
+    if is_multimodal(model) {
+        cmd.arg("--mllm");
+    }
+    let child = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(false)
