@@ -31,10 +31,6 @@ pub fn ffmpeg() -> anyhow::Result<PathBuf> {
     resolve("ffmpeg")
 }
 
-pub fn uv() -> anyhow::Result<PathBuf> {
-    resolve("uv")
-}
-
 /// rapid-mlx resolution, re-evaluated on each call so a venv provisioned *after*
 /// backend launch is picked up:
 ///   1. `${YT2O_VENV_DIR}/bin/rapid-mlx` (app-private venv, stable path)
