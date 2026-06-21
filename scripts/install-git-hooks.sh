@@ -8,5 +8,5 @@ git -C "$ROOT" config core.hooksPath .githooks
 chmod +x "$ROOT/.githooks/post-commit" "$ROOT/scripts/release.sh"
 
 echo "Git hooks installed."
-echo "  post-commit will build dist/yt2overview.dmg and dist/yt2overview-source.tar.gz."
+echo "  post-commit will build local artifacts and upload them to GitHub Releases."
 echo "  To skip once: YT2O_SKIP_RELEASE_HOOK=1 git commit ..."

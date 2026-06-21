@@ -9,5 +9,5 @@ if [[ "${YT2O_SKIP_RELEASE_HOOK:-}" == "1" ]]; then
     exit 0
 fi
 
-echo "yt2overview post-commit: building DMG and source release artifacts..."
-"$ROOT/scripts/release.sh"
+echo "yt2overview post-commit: building DMG/source artifacts and publishing GitHub Release..."
+"$ROOT/scripts/release.sh" --github

@@ -70,6 +70,7 @@ Clear ⌘⌫), *Overview* (Copy All ⌘⇧C, Copy AI payload ⌘⌥C, Readable �
 scripts/build.sh      # release builds of backend + app
 scripts/package.sh    # → build/yt2overview.app and dist/yt2overview.dmg (ad-hoc signed)
 scripts/release.sh    # → DMG + source archives in dist/
+scripts/release.sh --github  # also uploads SHA-stamped assets to GitHub Releases
 ```
 
 ### Commit-time local releases
@@ -80,14 +81,16 @@ Install the versioned git hook once:
 scripts/install-git-hooks.sh
 ```
 
-After that, every successful `git commit` runs `scripts/release.sh`, producing:
+After that, every successful `git commit` runs `scripts/release.sh --github`, producing:
 
 - `dist/yt2overview.dmg`
 - `dist/yt2overview-<commit>.dmg`
 - `dist/yt2overview-source.tar.gz`
 - `dist/yt2overview-source-<commit>.tar.gz`
+- a GitHub Release tagged `release-<commit>` with the SHA-stamped DMG and source archive
 
-Set `YT2O_SKIP_RELEASE_HOOK=1` on a commit to skip the local release build.
+Set `YT2O_SKIP_RELEASE_HOOK=1` on a commit to skip the release hook, or
+`YT2O_SKIP_GITHUB_RELEASE=1` to build local artifacts without uploading to GitHub Releases.
 
 ### Dev run (skip provisioning)
 
