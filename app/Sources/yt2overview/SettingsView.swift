@@ -134,7 +134,7 @@ struct SettingsView: View {
     private var sectionsSection: some View {
         SettingsGroup("Output sections", icon: "list.bullet.rectangle") {
             Toggle("AI instruction preamble", isOn: $model.settings.sections.aiPreamble)
-            Toggle("Video details", isOn: $model.settings.sections.metadata)
+            Toggle("Media details", isOn: $model.settings.sections.metadata)
             Toggle("Chapters", isOn: $model.settings.sections.chapters)
             Toggle("AI overview", isOn: $model.settings.sections.aiOverview)
             Toggle("Visual overview", isOn: $model.settings.sections.visualOverview)

@@ -80,7 +80,7 @@ pub struct Settings {
     // ---- Model / serving ----
     /// rapid-mlx model alias or HF id. Defaults to the cached multimodal Gemma 4.
     pub model: String,
-    /// Whisper model (mlx-whisper) for transcribing uploaded local files.
+    /// Whisper model (mlx-whisper) for transcribing uploaded local media files.
     pub whisper_model: String,
     /// Force a specific server port; 0 = auto (reuse running or pick free).
     pub mlx_port: u16,

@@ -24,7 +24,7 @@ struct AppCommands: Commands {
             Button("Generate Overview") { model.generate() }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(urlEmpty || model.isBusy)
-            Button("Paste URL & Generate") {
+            Button("Paste Link & Generate") {
                 model.pasteURL()
                 model.generate()
             }

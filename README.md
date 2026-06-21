@@ -1,36 +1,35 @@
 # yt2overview
 
-A macOS-native app that turns any YouTube URL into copiable, AI-ready text:
-**full transcript · top comments · visual (frame) overview · AI text overview · chapters**,
-all generated locally on Apple Silicon.
+A macOS-native app that turns media links and local audio/video files into copiable,
+AI-ready text: **full transcript · top comments when available · visual (frame)
+overview · AI text overview · chapters**, all generated locally on Apple Silicon.
 
-> Paste a link → get one clean document — a **Readable** view *and* an **AI-optimized** payload
-> (with an instruction preamble) you can drop into any chatbot. Copy the whole thing or any single
-> section.
+> Paste a link, pick files, or drag in media like `.m4a`, `.mp4`, `.mp3`, `.mov`, or `.wav`
+> → get one clean document — a **Readable** view *and* an **AI-optimized** payload
+> (with an instruction preamble). Copy the whole thing or any single section.
 
 ## How it works
 
 ```
 ┌─────────────────────────────┐     spawns      ┌──────────────────────────────┐
 │  SwiftUI app (Liquid Glass)  │ ───────────────▶│   Rust backend (axum, SSE)   │
-│  • URL input, live progress  │  localhost HTTP │   the orchestrator           │
+│  • links, files, live queue  │  localhost HTTP │   the orchestrator           │
 │  • Readable / AI-optimized   │◀─────────────── │                              │
 │  • per-section copy          │                 └───────────┬──────────────────┘
 │  • granular settings         │                             │
 └─────────────────────────────┘            ┌────────────────┼────────────────┐
                                             ▼                ▼                ▼
                                       yt-dlp            ffmpeg          rapid-mlx
-                                  (transcript,       (keyframes      (serves Gemma 4,
-                                   comments,          via stream-     OpenAI-compatible;
-                                   chapters,          seek, no         text + vision)
-                                   metadata)          full download)
+                                  (web media,       (local probe,   (serves Gemma 4,
+                                   comments,         keyframes,      OpenAI-compatible;
+                                   captions)         audio decode)   text + vision)
 ```
 
 | Layer | Tech |
 |-------|------|
 | **UI** | SwiftUI, macOS 26 native **Liquid Glass** (`.glassEffect`) + `NSVisualEffectView` mica |
 | **Backend** | **Rust** (`axum`) localhost server, SSE progress — bundled in the `.app` |
-| **Data** | **yt-dlp** (transcript, comments, metadata, chapters) + **ffmpeg** (keyframes) |
+| **Data** | **yt-dlp** for web media metadata/captions/comments + **ffmpeg/ffprobe** for local audio/video probing, decoding, and keyframes |
 | **Local AI** | **rapid-mlx** serving **Gemma 4** (multimodal) — text overview + vision frame overview |
 | **Provisioning** | first-run auto-install of `rapid-mlx[vision]` into a private venv via **uv** |
 | **Ship** | ad-hoc signed `.app` → **DMG** |
@@ -42,9 +41,12 @@ Everything runs locally. No API keys. No cloud.
 1. Open the app (or mount `dist/yt2overview.dmg` and drag to Applications).
 2. On first launch it provisions the model runtime (`rapid-mlx[vision]`) into
    `~/Library/Application Support/yt2overview/venv` — one-time, needs network.
-3. Paste a YouTube URL, hit **Generate**. The backend:
-   - pulls metadata, chapters, top-N comments and the transcript (yt-dlp),
-   - extracts keyframes by seeking into a low-res stream (ffmpeg — no full download),
+3. Paste a media link, pick one or more local files, or drag files onto the input. The backend:
+   - uses yt-dlp for web media metadata, chapters, top-N comments, and captions when available,
+   - uses ffprobe/ffmpeg for local audio/video files such as `.m4a`, `.mp4`, `.mp3`, `.mov`, and `.wav`,
+   - transcribes local media with embedded captions first, then mlx-whisper when needed,
+   - processes multiple added files through the local queue and saves each completed result to History,
+   - extracts keyframes from video sources when visual overview is enabled,
    - reuses a running/cached **Gemma 4** server or serves one on a free port (with `--mllm`
      for vision), and asks it for a text overview + a visual overview,
    - assembles the **Readable** and **AI-optimized** outputs.
@@ -58,7 +60,7 @@ timestamps, and which sections to include.
 `~/Library/Application Support/yt2overview/history.json`; reopen any past result from the History
 panel or the **History** menu.
 
-**Menu bar & shortcuts:** full native menus — *File* (Generate ⌘↵, Paste URL & Generate ⌘⇧V,
+**Menu bar & shortcuts:** full native menus — *File* (Generate ⌘↵, Paste Link & Generate ⌘⇧V,
 Clear ⌘⌫), *Overview* (Copy All ⌘⇧C, Copy AI payload ⌘⌥C, Readable ⌘1 / AI-optimized ⌘2),
 *History* (⌘Y + recents), plus About and Settings.
 

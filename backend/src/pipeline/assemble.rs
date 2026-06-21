@@ -136,7 +136,7 @@ are not present below.",
 pub fn assemble(data: &JobData, settings: &Settings) -> Outputs {
     let sec = &settings.sections;
     let mut sections: Vec<OutputSection> = Vec::new();
-    let mut push = |id: &str, title: &str, body: String, list: &mut Vec<OutputSection>| {
+    let push = |id: &str, title: &str, body: String, list: &mut Vec<OutputSection>| {
         if !body.trim().is_empty() {
             list.push(OutputSection {
                 id: id.to_string(),
