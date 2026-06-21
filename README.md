@@ -69,7 +69,25 @@ Clear ⌘⌫), *Overview* (Copy All ⌘⇧C, Copy AI payload ⌘⌥C, Readable �
 ```sh
 scripts/build.sh      # release builds of backend + app
 scripts/package.sh    # → build/yt2overview.app and dist/yt2overview.dmg (ad-hoc signed)
+scripts/release.sh    # → DMG + source archives in dist/
 ```
+
+### Commit-time local releases
+
+Install the versioned git hook once:
+
+```sh
+scripts/install-git-hooks.sh
+```
+
+After that, every successful `git commit` runs `scripts/release.sh`, producing:
+
+- `dist/yt2overview.dmg`
+- `dist/yt2overview-<commit>.dmg`
+- `dist/yt2overview-source.tar.gz`
+- `dist/yt2overview-source-<commit>.tar.gz`
+
+Set `YT2O_SKIP_RELEASE_HOOK=1` on a commit to skip the local release build.
 
 ### Dev run (skip provisioning)
 

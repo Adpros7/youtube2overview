@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Build local release artifacts after each commit.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+if [[ "${YT2O_SKIP_RELEASE_HOOK:-}" == "1" ]]; then
+    echo "yt2overview post-commit: skipped because YT2O_SKIP_RELEASE_HOOK=1"
+    exit 0
+fi
+
+echo "yt2overview post-commit: building DMG and source release artifacts..."
+"$ROOT/scripts/release.sh"
