@@ -1,7 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Bindable var model: AppModel
+    @State private var showImporter = false
+    @State private var dropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,7 +111,7 @@ struct ContentView: View {
     private var inputCard: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Paste a YouTube link")
+                Text("Paste a YouTube link — or upload / drop a video file")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
@@ -117,6 +120,15 @@ struct ContentView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 15))
                         .onSubmit { model.generate() }
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(.glass)
+                    .help("Upload a local video file")
+                    .disabled(model.isBusy)
                     Button {
                         model.generate()
                     } label: {
@@ -129,8 +141,43 @@ struct ContentView: View {
                 }
                 .padding(12)
                 .glassPanel()
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Theme.accent, lineWidth: dropTargeted ? 2 : 0)
+                )
+                if let name = model.localFileLabel {
+                    HStack(spacing: 6) {
+                        Image(systemName: "film").foregroundStyle(Theme.violet)
+                        Text(name).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                }
             }
         }
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            handleDrop(providers)
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie, .video, .audio],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                model.useLocalFile(url)
+            }
+        }
+    }
+
+    /// Accept a dropped file URL (first video/audio file) and start a job.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url else { return }
+            Task { @MainActor in model.useLocalFile(url) }
+        }
+        return true
     }
 
     // MARK: Body content (placeholder / progress / results)

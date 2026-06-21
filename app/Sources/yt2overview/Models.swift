@@ -39,6 +39,7 @@ struct Sections: Codable, Equatable {
 
 struct Settings: Codable, Equatable {
     var model = "mlx-community/gemma-4-12b-it-4bit"
+    var whisperModel = "mlx-community/whisper-large-v3-turbo"
     var mlxPort: Int = 0
     var temperature: Double = 0.4
     var maxTokens: Int = 1536

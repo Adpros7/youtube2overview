@@ -1,16 +1,36 @@
-//! Keyframe extraction via ffmpeg, seeking directly into a low-res stream URL
-//! (no full-video download).
+//! Keyframe extraction via ffmpeg. For YouTube we seek directly into a low-res stream
+//! URL (no full-video download); for local files we seek the file in place.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 use crate::config::{FrameStrategy, Settings};
-use crate::model::{Chapter, Frame};
+use crate::model::{Chapter, Frame, Source};
 use crate::tools;
 
-/// Resolve a low-res, seekable stream URL for the video.
+/// Bound on concurrent ffmpeg seeks (each opens its own connection for remote streams).
+const MAX_CONCURRENT_SEEKS: usize = 4;
+
+/// Resolve the ffmpeg input for a source: a local file path, or a remote stream URL.
+/// For YouTube, prefer a URL already resolved from the metadata dump to avoid a second
+/// (expensive) yt-dlp extraction; fall back to `yt-dlp -g` only if none was provided.
+async fn ffmpeg_input(source: &Source, prefetched: Option<&str>) -> anyhow::Result<String> {
+    match source {
+        Source::Local(path) => Ok(path.to_string_lossy().to_string()),
+        Source::YouTube(url) => {
+            if let Some(u) = prefetched.filter(|u| !u.trim().is_empty()) {
+                return Ok(u.to_string());
+            }
+            stream_url(url).await
+        }
+    }
+}
+
+/// Resolve a low-res, seekable stream URL via `yt-dlp -g` (fallback path).
 async fn stream_url(url: &str) -> anyhow::Result<String> {
     let yt = tools::yt_dlp()?;
     let out = Command::new(&yt)
@@ -83,9 +103,12 @@ fn subsample(items: Vec<f64>, n: usize) -> Vec<f64> {
         .collect()
 }
 
-/// Extract keyframes. Returns the frames in chronological order.
+/// Extract keyframes. Returns the frames in chronological order. `prefetched_url` is a
+/// stream URL already resolved from the metadata dump (YouTube only), to avoid a second
+/// yt-dlp call.
 pub async fn extract(
-    url: &str,
+    source: &Source,
+    prefetched_url: Option<&str>,
     settings: &Settings,
     chapters: &[Chapter],
     duration: f64,
@@ -95,7 +118,7 @@ pub async fn extract(
         return Ok(Vec::new());
     }
     let ffmpeg = tools::ffmpeg()?;
-    let surl = stream_url(url).await?;
+    let surl = ffmpeg_input(source, prefetched_url).await?;
 
     if matches!(settings.frame_strategy, FrameStrategy::SceneChange) {
         return scene_change(&ffmpeg, &surl, settings, chapters, duration, work_dir).await;
@@ -116,12 +139,15 @@ async fn extract_at(
     if ts.is_empty() {
         return Ok(Vec::new());
     }
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_SEEKS));
     let mut handles = Vec::new();
     for (idx, &t) in ts.iter().enumerate() {
         let ffmpeg = ffmpeg.to_path_buf();
         let surl = surl.to_string();
         let path = work_dir.join(format!("frame_{idx:02}.jpg"));
+        let sem = sem.clone();
         handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await;
             let ok = extract_one(&ffmpeg, &surl, t, &path).await;
             (t, path, ok)
         }));

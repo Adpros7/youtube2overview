@@ -118,6 +118,14 @@ struct SettingsView: View {
             if model.settings.includeTranscript {
                 Toggle("Keep timestamps", isOn: $model.settings.transcriptTimestamps)
             }
+            HStack {
+                Text("Whisper model (local files)").settingLabel()
+                Spacer()
+                TextField("mlx-community/whisper-large-v3-turbo", text: $model.settings.whisperModel)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 240)
+            }
+            Text("Used to transcribe uploaded videos that have no captions.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
 

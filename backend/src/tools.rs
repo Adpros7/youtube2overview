@@ -31,6 +31,33 @@ pub fn ffmpeg() -> anyhow::Result<PathBuf> {
     resolve("ffmpeg")
 }
 
+pub fn ffprobe() -> anyhow::Result<PathBuf> {
+    resolve("ffprobe")
+}
+
+/// mlx-whisper (local ASR for uploaded files), resolved like [`rapid_mlx`] so a venv
+/// provisioned after launch is picked up:
+///   1. `${YT2O_VENV_DIR}/bin/mlx_whisper`
+///   2. sibling of `YT2O_MLX_BIN` (dev: same venv as rapid-mlx)
+///   3. system PATH / bundled
+pub fn mlx_whisper() -> anyhow::Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("YT2O_VENV_DIR").map(PathBuf::from) {
+        let p = dir.join("bin/mlx_whisper");
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    if let Some(p) = std::env::var_os("YT2O_MLX_BIN").map(PathBuf::from) {
+        if let Some(dir) = p.parent() {
+            let w = dir.join("mlx_whisper");
+            if w.exists() {
+                return Ok(w);
+            }
+        }
+    }
+    resolve("mlx_whisper").map_err(|_| anyhow!("mlx_whisper not found; provisioned via uv on first run"))
+}
+
 /// rapid-mlx resolution, re-evaluated on each call so a venv provisioned *after*
 /// backend launch is picked up:
 ///   1. `${YT2O_VENV_DIR}/bin/rapid-mlx` (app-private venv, stable path)

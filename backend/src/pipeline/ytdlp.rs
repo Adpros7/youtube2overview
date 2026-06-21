@@ -1,6 +1,11 @@
 //! yt-dlp integration: metadata, chapters, comments, and transcript.
+//!
+//! A single `yt-dlp -J` pass already returns the caption URLs and progressive stream
+//! URL in its JSON, so we extract those here and reuse them — avoiding two extra
+//! (expensive) player extractions for the transcript and keyframe stages.
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use serde_json::Value;
@@ -10,11 +15,18 @@ use crate::config::{CommentSort, Settings};
 use crate::model::{Chapter, Comment, Cue, VideoMeta};
 use crate::tools;
 
+/// A caption track resolved from the dump JSON: (lang, ext, url).
+pub type CaptionRef = (String, String, String);
+
 /// Result of the single metadata/comments dump pass.
 pub struct DumpResult {
     pub meta: VideoMeta,
     pub chapters: Vec<Chapter>,
     pub comments: Vec<Comment>,
+    /// Best caption track (lang, ext, url) pulled straight from the JSON, if any.
+    pub caption: Option<CaptionRef>,
+    /// A progressive (audio+video) stream URL for keyframe seeking, if found.
+    pub stream_url: Option<String>,
 }
 
 fn s(v: &Value, key: &str) -> String {
@@ -112,11 +124,127 @@ pub async fn dump(url: &str, settings: &Settings) -> anyhow::Result<DumpResult> 
     }
     comments.truncate(settings.max_comments() as usize);
 
+    let caption = pick_caption(&v, settings.language.trim());
+    let stream_url = pick_stream_url(&v);
+
     Ok(DumpResult {
         meta,
         chapters,
         comments,
+        caption,
+        stream_url,
     })
+}
+
+/// Pick the best caption track from the dump JSON, preferring manual subtitles over
+/// auto-captions, the requested language (then English), and json3 over vtt.
+fn pick_caption(v: &Value, lang_pref: &str) -> Option<CaptionRef> {
+    let langs: Vec<String> = if lang_pref.is_empty() {
+        vec!["en".to_string()]
+    } else {
+        vec![lang_pref.to_string(), "en".to_string()]
+    };
+    let ext_rank = |e: &str| match e {
+        "json3" => 3,
+        "vtt" => 1,
+        _ => 0, // srv3 etc. are XML; skip in the direct-fetch path
+    };
+
+    for key in ["subtitles", "automatic_captions"] {
+        let Some(obj) = v.get(key).and_then(|x| x.as_object()) else {
+            continue;
+        };
+        for want in &langs {
+            // Exact lang match first, else any prefix (e.g. "en-US", "en-orig").
+            let keys: Vec<&String> = {
+                let exact: Vec<&String> = obj.keys().filter(|k| k.as_str() == want).collect();
+                if exact.is_empty() {
+                    obj.keys().filter(|k| k.starts_with(want.as_str())).collect()
+                } else {
+                    exact
+                }
+            };
+            let mut best: Option<(i32, CaptionRef)> = None;
+            for k in keys {
+                let Some(arr) = obj.get(k).and_then(|a| a.as_array()) else {
+                    continue;
+                };
+                for e in arr {
+                    let ext = s(e, "ext");
+                    let url = s(e, "url");
+                    let rank = ext_rank(&ext);
+                    if url.is_empty() || rank == 0 {
+                        continue;
+                    }
+                    if best.as_ref().map(|(r, _)| rank > *r).unwrap_or(true) {
+                        best = Some((rank, (k.clone(), ext, url)));
+                    }
+                }
+            }
+            if let Some((_, cap)) = best {
+                return Some(cap);
+            }
+        }
+    }
+    None
+}
+
+/// Pick a progressive (audio+video) stream URL for keyframe seeking. Prefers itag 18
+/// (360p mp4), else the lowest-resolution progressive format.
+fn pick_stream_url(v: &Value) -> Option<String> {
+    let formats = v.get("formats").and_then(|f| f.as_array())?;
+    let by_id = formats
+        .iter()
+        .find(|f| s(f, "format_id") == "18")
+        .map(|f| s(f, "url"))
+        .filter(|u| !u.is_empty());
+    if by_id.is_some() {
+        return by_id;
+    }
+    let mut best: Option<(f64, String)> = None;
+    for f in formats {
+        let url = s(f, "url");
+        if url.is_empty() {
+            continue;
+        }
+        let has_video = f
+            .get("vcodec")
+            .and_then(|x| x.as_str())
+            .map(|c| c != "none")
+            .unwrap_or(false);
+        let has_audio = f
+            .get("acodec")
+            .and_then(|x| x.as_str())
+            .map(|c| c != "none")
+            .unwrap_or(false);
+        if !(has_video && has_audio) {
+            continue;
+        }
+        let height = f.get("height").and_then(|x| x.as_f64()).unwrap_or(1e9);
+        if best.as_ref().map(|(h, _)| height < *h).unwrap_or(true) {
+            best = Some((height, url));
+        }
+    }
+    best.map(|(_, u)| u)
+}
+
+/// Fetch a caption track directly by URL (no extra yt-dlp invocation) and parse it.
+pub async fn fetch_caption(url: &str, ext: &str) -> anyhow::Result<Vec<Cue>> {
+    let client = reqwest::Client::new();
+    let raw = client
+        .get(url)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .context("caption fetch failed")?
+        .text()
+        .await
+        .context("caption body not text")?;
+    let cues = match ext {
+        "json3" | "srv3" => parse_json3(&raw),
+        _ => parse_vtt(&raw),
+    };
+    Ok(cues)
 }
 
 /// Download auto/manual subtitles and parse them into cues. Returns (cues, lang).
@@ -208,7 +336,7 @@ pub async fn transcript(
 }
 
 /// Parse YouTube json3/srv3 caption format.
-fn parse_json3(raw: &str) -> Vec<Cue> {
+pub(crate) fn parse_json3(raw: &str) -> Vec<Cue> {
     let Ok(v) = serde_json::from_str::<Value>(raw) else {
         return Vec::new();
     };
@@ -241,7 +369,7 @@ fn parse_json3(raw: &str) -> Vec<Cue> {
 
 /// Minimal WebVTT parser (fallback). De-duplicates consecutive identical lines
 /// (rolling auto-captions repeat).
-fn parse_vtt(raw: &str) -> Vec<Cue> {
+pub(crate) fn parse_vtt(raw: &str) -> Vec<Cue> {
     let mut cues: Vec<Cue> = Vec::new();
     let mut cur_start: Option<f64> = None;
     let mut buf: Vec<String> = Vec::new();

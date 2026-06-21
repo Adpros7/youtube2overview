@@ -1,5 +1,7 @@
 //! Shared data model for a processing job: inputs, intermediate data, and final outputs.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::Settings;
@@ -7,9 +9,40 @@ use crate::config::Settings;
 /// Incoming request body for `POST /process`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProcessRequest {
+    /// A YouTube URL or a local file path / `file://` URL — classified by [`Source`].
     pub url: String,
     #[serde(default)]
     pub settings: Settings,
+}
+
+/// Where the video comes from. The same `url` field carries either a web URL or a
+/// local path; `classify` decides which.
+#[derive(Debug, Clone)]
+pub enum Source {
+    YouTube(String),
+    Local(PathBuf),
+}
+
+impl Source {
+    /// Classify the request input: a local file (existing path or `file://` URL) vs.
+    /// a web URL handled by yt-dlp.
+    pub fn classify(input: &str) -> Source {
+        let trimmed = input.trim();
+        if let Some(rest) = trimmed.strip_prefix("file://") {
+            // Percent-decoding is unlikely to matter for picker-produced paths; take the
+            // path verbatim, trimming an authority-less leading host if present.
+            let path = rest.strip_prefix("localhost").unwrap_or(rest);
+            return Source::Local(PathBuf::from(path));
+        }
+        let looks_web = trimmed.starts_with("http://") || trimmed.starts_with("https://");
+        if !looks_web {
+            let p = PathBuf::from(trimmed);
+            if p.is_file() {
+                return Source::Local(p);
+            }
+        }
+        Source::YouTube(trimmed.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

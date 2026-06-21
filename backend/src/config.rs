@@ -80,6 +80,8 @@ pub struct Settings {
     // ---- Model / serving ----
     /// rapid-mlx model alias or HF id. Defaults to the cached multimodal Gemma 4.
     pub model: String,
+    /// Whisper model (mlx-whisper) for transcribing uploaded local files.
+    pub whisper_model: String,
     /// Force a specific server port; 0 = auto (reuse running or pick free).
     pub mlx_port: u16,
     pub temperature: f32,
@@ -115,6 +117,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             model: "mlx-community/gemma-4-12b-it-4bit".to_string(),
+            whisper_model: "mlx-community/whisper-large-v3-turbo".to_string(),
             mlx_port: 0,
             temperature: 0.4,
             max_tokens: 1536,

@@ -57,11 +57,11 @@ final class Provisioner {
             state = .installing("Creating Python environment…")
             try await run(uv, ["venv", Self.venvDir.path, "--python", "3.12", "--seed"])
 
-            state = .installing("Installing rapid-mlx (vision)… this can take a few minutes")
+            state = .installing("Installing rapid-mlx (vision) + whisper… this can take a few minutes")
             try await run(
                 uv,
                 ["pip", "install", "--python", Self.venvDir.appendingPathComponent("bin/python").path,
-                 "rapid-mlx[vision]"],
+                 "rapid-mlx[vision]", "mlx-whisper"],
                 onLine: { [weak self] line in
                     guard let self else { return }
                     if let pretty = Self.prettyInstallLine(line) {
@@ -120,7 +120,7 @@ final class Provisioner {
     private static func prettyInstallLine(_ line: String) -> String? {
         if line.contains("Resolved") || line.contains("Prepared") || line.contains("Installed")
             || line.contains("Downloading") || line.contains("Building") {
-            return "Installing rapid-mlx (vision)… \(line.trimmingCharacters(in: .whitespaces))"
+            return "Installing runtime… \(line.trimmingCharacters(in: .whitespaces))"
         }
         return nil
     }

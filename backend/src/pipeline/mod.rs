@@ -4,12 +4,14 @@
 pub mod assemble;
 pub mod frames;
 pub mod infer;
+pub mod probe;
+pub mod transcribe;
 pub mod ytdlp;
 
 use std::sync::Arc;
 
 use crate::mlx::MlxManager;
-use crate::model::{JobData, JobResult, Outputs, ProcessRequest};
+use crate::model::{JobData, JobResult, Outputs, ProcessRequest, Source};
 use crate::state::{Job, ProgressEvent};
 
 /// Convenience wrapper around a job for emitting staged progress.
@@ -56,16 +58,33 @@ async fn run_inner(
     req: &ProcessRequest,
 ) -> anyhow::Result<(JobData, Outputs)> {
     let settings = &req.settings;
-    let _ = mlx; // used by the model stage (Phase 5)
     let work = tempfile::tempdir().map_err(|e| anyhow::anyhow!("tempdir: {e}"))?;
     let mut data = JobData::default();
 
+    let source = Source::classify(&req.url);
+    // Stream URL and caption track resolved from the YouTube dump (reused downstream to
+    // avoid extra yt-dlp extractions).
+    let mut stream_url: Option<String> = None;
+    let mut caption: Option<ytdlp::CaptionRef> = None;
+
     // --- Stage: fetch metadata, chapters, comments ---
     reporter.stage("fetch", "Fetching video metadata…", 0.05).await;
-    let dump = ytdlp::dump(&req.url, settings).await?;
-    data.meta = dump.meta;
-    data.chapters = dump.chapters;
-    data.comments = dump.comments;
+    match &source {
+        Source::YouTube(url) => {
+            let dump = ytdlp::dump(url, settings).await?;
+            data.meta = dump.meta;
+            data.chapters = dump.chapters;
+            data.comments = dump.comments;
+            stream_url = dump.stream_url;
+            caption = dump.caption;
+        }
+        Source::Local(path) => {
+            let probed = probe::meta(path).await?;
+            data.meta = probed.meta;
+            data.chapters = probed.chapters;
+            // No comments for local files.
+        }
+    }
     reporter
         .stage(
             "fetch",
@@ -76,8 +95,37 @@ async fn run_inner(
 
     // --- Stage: transcript ---
     if settings.include_transcript || settings.sections.ai_overview {
-        reporter.stage("transcript", "Fetching transcript…", 0.22).await;
-        let (cues, lang) = ytdlp::transcript(&req.url, settings, work.path()).await?;
+        let (cues, lang) = match &source {
+            Source::YouTube(url) => {
+                reporter.stage("transcript", "Fetching transcript…", 0.22).await;
+                // Prefer the caption URL from the dump (no second yt-dlp); fall back to
+                // the yt-dlp subtitle download if the direct fetch yields nothing.
+                let mut got: Option<(Vec<crate::model::Cue>, String)> = None;
+                if let Some((lang, ext, curl)) = &caption {
+                    if let Ok(cues) = ytdlp::fetch_caption(curl, ext).await {
+                        if !cues.is_empty() {
+                            got = Some((cues, lang.clone()));
+                        }
+                    }
+                }
+                match got {
+                    Some(g) => g,
+                    None => ytdlp::transcript(url, settings, work.path()).await?,
+                }
+            }
+            Source::Local(path) => {
+                reporter
+                    .stage("transcript", "Transcribing audio (local)…", 0.22)
+                    .await;
+                match transcribe::local(path, settings, work.path()).await {
+                    Ok(g) => g,
+                    Err(e) => {
+                        tracing::warn!("local transcription failed: {e:#}");
+                        (Vec::new(), String::new())
+                    }
+                }
+            }
+        };
         let n = cues.len();
         data.cues = cues;
         data.transcript_lang = lang;
@@ -90,7 +138,8 @@ async fn run_inner(
     if settings.include_visual && settings.max_frames() > 0 {
         reporter.stage("frames", "Extracting keyframes…", 0.4).await;
         match frames::extract(
-            &req.url,
+            &source,
+            stream_url.as_deref(),
             settings,
             &data.chapters,
             data.meta.duration,
@@ -138,9 +187,31 @@ async fn run_inner(
         data.model_used = endpoint.model_id.clone();
 
         if need_text {
-            reporter.stage("model", "Writing AI overview…", 0.66).await;
-            match infer::text_overview(&endpoint, settings, &data.meta, &data.chapters, &data.cues)
-                .await
+            reporter.stage("model", "Writing AI overview…", 0.6).await;
+            let job_for_text = reporter.clone_job();
+            let progress = move |done: usize, total: usize| {
+                let job = job_for_text.clone();
+                tokio::spawn(async move {
+                    let (msg, frac) = if total > 1 {
+                        (
+                            format!("Summarizing transcript… part {}/{}", done.min(total), total),
+                            0.6 + 0.18 * (done as f32 / total as f32),
+                        )
+                    } else {
+                        ("Writing AI overview…".to_string(), 0.66)
+                    };
+                    job.emit(ProgressEvent::progress("model", msg, frac)).await;
+                });
+            };
+            match infer::text_overview(
+                &endpoint,
+                settings,
+                &data.meta,
+                &data.chapters,
+                &data.cues,
+                &progress,
+            )
+            .await
             {
                 Ok(t) => data.ai_overview = t,
                 Err(e) => tracing::warn!("text overview failed: {e:#}"),

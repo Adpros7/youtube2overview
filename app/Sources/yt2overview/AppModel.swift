@@ -71,6 +71,21 @@ final class AppModel {
         Task { await runJob(target) }
     }
 
+    /// Use a locally-picked/dropped video file as the source and start a job.
+    func useLocalFile(_ fileURL: URL) {
+        guard !isBusy else { return }
+        url = fileURL.path
+        generate()
+    }
+
+    /// Filename to show when the current input is a local file (vs. a web URL).
+    var localFileLabel: String? {
+        let t = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !t.hasPrefix("http"),
+              FileManager.default.fileExists(atPath: t) else { return nil }
+        return (t as NSString).lastPathComponent
+    }
+
     private func runJob(_ target: String) async {
         do {
             if backend.baseURL == nil { try await backend.start() }
