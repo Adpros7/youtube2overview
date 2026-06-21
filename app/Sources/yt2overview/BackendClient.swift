@@ -52,9 +52,9 @@ final class BackendClient: @unchecked Sendable {
            FileManager.default.fileExists(atPath: binDir) {
             env["YT2O_BIN_DIR"] = binDir
         }
-        if let mlx = Provisioner.provisionedMlxBin(), FileManager.default.isExecutableFile(atPath: mlx) {
-            env["YT2O_MLX_BIN"] = mlx
-        }
+        // Stable venv dir: the backend re-checks this each job, so provisioning that
+        // finishes *after* launch is still picked up.
+        env["YT2O_VENV_DIR"] = Provisioner.venvDir.path
         return env
     }
 

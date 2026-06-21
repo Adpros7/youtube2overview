@@ -35,14 +35,23 @@ pub fn uv() -> anyhow::Result<PathBuf> {
     resolve("uv")
 }
 
-/// rapid-mlx may live in a provisioned venv (`YT2O_MLX_BIN`) before it's on PATH.
+/// rapid-mlx resolution, re-evaluated on each call so a venv provisioned *after*
+/// backend launch is picked up:
+///   1. `${YT2O_VENV_DIR}/bin/rapid-mlx` (app-private venv, stable path)
+///   2. `YT2O_MLX_BIN` (explicit override, used in dev)
+///   3. system PATH / bundled
 pub fn rapid_mlx() -> anyhow::Result<PathBuf> {
+    if let Some(dir) = std::env::var_os("YT2O_VENV_DIR").map(PathBuf::from) {
+        let p = dir.join("bin/rapid-mlx");
+        if p.exists() {
+            return Ok(p);
+        }
+    }
     if let Some(p) = std::env::var_os("YT2O_MLX_BIN").map(PathBuf::from) {
         if p.exists() {
             return Ok(p);
         }
     }
-    resolve("rapid-mlx").map_err(|_| {
-        anyhow!("rapid-mlx not found; it is provisioned on first run via uv")
-    })
+    resolve("rapid-mlx")
+        .map_err(|_| anyhow!("rapid-mlx not found; it is provisioned on first run via uv"))
 }

@@ -23,6 +23,7 @@ final class AppModel {
     /// "human" or "ai"
     var outputMode: String = "human"
 
+    let provisioner = Provisioner()
     private let backend = BackendClient()
     private var started = false
 
@@ -42,6 +43,8 @@ final class AppModel {
     func bootIfNeeded() async {
         guard !started else { return }
         started = true
+        // Provision the model runtime in the background; the UI shows a banner while it runs.
+        Task { await provisioner.ensureReady() }
         do {
             try await backend.start()
             cachedModels = (try? await backend.models()) ?? []
@@ -66,6 +69,8 @@ final class AppModel {
     private func runJob(_ target: String) async {
         do {
             if backend.baseURL == nil { try await backend.start() }
+            // Make sure the model runtime is installed before a job needs it.
+            await provisioner.ensureReady()
             let jobId = try await backend.process(url: target, settings: settings)
             phase = .running(stage: "start", message: "Starting…", progress: 0.02)
             for try await ev in backend.events(jobId: jobId) {

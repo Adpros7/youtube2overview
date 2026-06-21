@@ -9,6 +9,7 @@ struct ContentView: View {
             Divider().opacity(0.15)
             ScrollView {
                 VStack(spacing: 20) {
+                    provisioningBanner
                     inputCard
                     content
                 }
@@ -53,6 +54,43 @@ struct ContentView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .padding(.top, 18)
+    }
+
+    // MARK: Provisioning banner
+
+    @ViewBuilder private var provisioningBanner: some View {
+        switch model.provisioner.state {
+        case .checking, .installing:
+            GlassCard(corner: 16, padding: 14) {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Setting up the local AI runtime").font(.system(size: 12, weight: .semibold))
+                        Text(provisioningMessage).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+            }
+        case .failed(let msg):
+            GlassCard(corner: 16, padding: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("Runtime setup failed: \(msg)").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private var provisioningMessage: String {
+        switch model.provisioner.state {
+        case .installing(let m): return m
+        case .checking: return "Checking…"
+        default: return ""
+        }
     }
 
     // MARK: Input
