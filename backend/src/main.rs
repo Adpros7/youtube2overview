@@ -7,6 +7,8 @@
 mod api;
 mod config;
 mod error;
+mod model;
+mod pipeline;
 mod state;
 
 use std::net::{Ipv4Addr, SocketAddr};
