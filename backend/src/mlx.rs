@@ -1,12 +1,23 @@
-//! rapid-mlx server orchestration.
+//! rapid-mlx server *pool* orchestration.
 //!
-//! Strategy: reuse a server that is already serving the requested model; otherwise
-//! start one on a free port. The handle is cached in [`MlxManager`] so subsequent jobs
-//! reuse the same server instead of reloading the model.
+//! Maintains a pool of rapid-mlx servers — each its own process on its own port, all
+//! serving the same model. Concurrent jobs are load-balanced across the pool (least
+//! in-flight wins) so they don't all serialize behind one server.
+//!
+//! IMPORTANT: every server shares the one Apple Silicon GPU, so a pool is **not** a
+//! linear speedup. It overlaps host-side gaps (HTTP, base64, JSON, subprocess spin-up)
+//! and lets one job's GPU-free stages run while another job holds the GPU. Throughput is
+//! still ultimately GPU-bound. See the project memory note on this.
+//!
+//! The pool is started lazily on first use, up to `target` servers, and persists for the
+//! lifetime of the process so the (one-time) model load is amortized across all jobs.
+//! Crucially, the model load is awaited *without* holding any lock, so a second job is
+//! never blocked behind the first job's load.
 
 use std::process::Stdio;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context};
 use tokio::sync::Mutex;
@@ -20,88 +31,215 @@ pub struct Endpoint {
     pub model_id: String,
 }
 
-struct Running {
+/// A pooled rapid-mlx server.
+struct Server {
     port: u16,
     /// What we asked rapid-mlx to serve (repo id or alias).
     requested: String,
-    model_id: String,
-    /// `Some` if we started it (so we could stop it); `None` if pre-existing.
+    /// `Some(id)` once the server has reported a served model (i.e. is ready).
+    model_id: StdMutex<Option<String>>,
+    /// Number of jobs currently using this server, for least-loaded selection.
+    inflight: AtomicUsize,
+    /// `Some` if we started it (kept alive so the process isn't reaped); `None` if adopted.
     _child: Option<tokio::process::Child>,
+}
+
+impl Server {
+    fn ready_model_id(&self) -> Option<String> {
+        self.model_id.lock().unwrap().clone()
+    }
+}
+
+/// A handle to a pooled server held for the duration of a job. Releases its in-flight
+/// slot on drop so the next job can prefer a less-busy server.
+pub struct Lease {
+    server: Arc<Server>,
+}
+
+impl Lease {
+    pub fn endpoint(&self) -> Endpoint {
+        Endpoint {
+            base_url: base(self.server.port),
+            model_id: self.server.ready_model_id().unwrap_or_default(),
+        }
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.server.inflight.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 #[derive(Default)]
 pub struct MlxManager {
-    current: Mutex<Option<Running>>,
+    servers: Mutex<Vec<Arc<Server>>>,
+    /// Serializes pool growth so concurrent jobs cooperate instead of racing to start
+    /// duplicate servers. Held only while *launching* processes — never across a load.
+    grow: Mutex<()>,
 }
 
 /// Progress callback used while waiting for the model to load/download.
 pub type StatusFn<'a> = dyn Fn(String) + Send + Sync + 'a;
+
+/// Overall budget for a server to become ready (first run may download several GB).
+const READY_BUDGET: Duration = Duration::from_secs(60 * 30);
 
 impl MlxManager {
     pub fn new() -> Arc<Self> {
         Arc::new(MlxManager::default())
     }
 
-    /// Ensure a server is serving `model`, returning a ready endpoint.
-    pub async fn ensure(
+    /// Acquire a ready server serving `model`, returning a [`Lease`].
+    ///
+    /// `forced_port != 0` pins the pool to a single server on that port. Otherwise the
+    /// pool is grown to `target_servers` (min 1) on free ports.
+    pub async fn acquire(
         &self,
         model: &str,
         forced_port: u16,
+        target_servers: u16,
         status: &StatusFn<'_>,
-    ) -> anyhow::Result<Endpoint> {
-        let mut guard = self.current.lock().await;
-
-        // 1. Reuse our own previously-started server if it matches.
-        if let Some(r) = guard.as_ref() {
-            if model_matches(&r.requested, model) && probe_ready(r.port).await.is_some() {
-                return Ok(Endpoint {
-                    base_url: base(r.port),
-                    model_id: r.model_id.clone(),
-                });
-            }
-        }
-
-        // 2. Reuse an externally-running rapid-mlx server serving this model.
-        if let Some((port, _m)) = find_running(model).await {
-            if let Some(model_id) = probe_ready(port).await {
-                status(format!("Reusing running model server on :{port}"));
-                *guard = Some(Running {
-                    port,
-                    requested: model.to_string(),
-                    model_id: model_id.clone(),
-                    _child: None,
-                });
-                return Ok(Endpoint {
-                    base_url: base(port),
-                    model_id,
-                });
-            }
-        }
-
-        // 3. Start a new server on a free (or forced) port.
-        let port = if forced_port != 0 {
-            forced_port
+    ) -> anyhow::Result<Lease> {
+        let target = if forced_port != 0 {
+            1
         } else {
-            free_port()?
+            target_servers.max(1) as usize
         };
-        status(format!("Starting model server (loading {model})…"));
-        let child = spawn_server(model, port).await?;
 
-        // 4. Wait for readiness (first run may download several GB).
-        let model_id = wait_ready(port, status)
-            .await
-            .context("model server did not become ready")?;
+        // Ensure the pool has `target` servers for this model (launches processes; does
+        // not wait for them to load).
+        self.ensure_pool(model, forced_port, target, status).await?;
 
-        *guard = Some(Running {
+        // Wait until at least one server is ready, then take the least-loaded one.
+        let deadline = Instant::now() + READY_BUDGET;
+        let mut announced = false;
+        loop {
+            self.refresh_ready(model).await;
+            if let Some(lease) = self.pick_ready(model).await {
+                return Ok(lease);
+            }
+            if Instant::now() > deadline {
+                return Err(anyhow!(
+                    "model server did not become ready within {:?}",
+                    READY_BUDGET
+                ));
+            }
+            if !announced {
+                status(format!("Loading model ({model})…"));
+                announced = true;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// Launch servers until the pool holds `target` for this model. Fast: only spawns
+    /// processes (and optionally adopts an externally-running server); never awaits a load.
+    async fn ensure_pool(
+        &self,
+        model: &str,
+        forced_port: u16,
+        target: usize,
+        status: &StatusFn<'_>,
+    ) -> anyhow::Result<()> {
+        let _g = self.grow.lock().await;
+
+        let have = {
+            let servers = self.servers.lock().await;
+            servers
+                .iter()
+                .filter(|s| model_matches(&s.requested, model))
+                .count()
+        };
+        let need = target.saturating_sub(have);
+        if need == 0 {
+            return Ok(());
+        }
+
+        let mut fresh: Vec<Server> = Vec::new();
+
+        // Prefer adopting an already-running rapid-mlx server (e.g. one a developer
+        // started by hand) as a pool member, unless a specific port was forced.
+        if forced_port == 0 {
+            if let Some((port, _)) = find_running(model).await {
+                status(format!("Reusing running model server on :{port}"));
+                fresh.push(Server::adopted(port, model));
+            }
+        }
+
+        while fresh.len() < need {
+            let port = if forced_port != 0 {
+                forced_port
+            } else {
+                free_port()?
+            };
+            status(format!("Starting model server on :{port} ({model})…"));
+            let child = spawn_server(model, port).await?;
+            fresh.push(Server::started(port, model, child));
+            if forced_port != 0 {
+                break; // a forced port can only host one server
+            }
+        }
+
+        // Commit, skipping any port we somehow already track.
+        let mut servers = self.servers.lock().await;
+        for s in fresh {
+            if !servers.iter().any(|e| e.port == s.port) {
+                servers.push(Arc::new(s));
+            }
+        }
+        Ok(())
+    }
+
+    /// Probe every not-yet-ready server for this model and record its served model id.
+    async fn refresh_ready(&self, model: &str) {
+        let pending: Vec<Arc<Server>> = {
+            let servers = self.servers.lock().await;
+            servers
+                .iter()
+                .filter(|s| model_matches(&s.requested, model) && s.ready_model_id().is_none())
+                .cloned()
+                .collect()
+        };
+        for s in pending {
+            if let Some(id) = probe_ready(s.port).await {
+                *s.model_id.lock().unwrap() = Some(id);
+            }
+        }
+    }
+
+    /// Pick the ready server for `model` with the fewest in-flight jobs, reserving a slot.
+    async fn pick_ready(&self, model: &str) -> Option<Lease> {
+        let servers = self.servers.lock().await;
+        let chosen = servers
+            .iter()
+            .filter(|s| model_matches(&s.requested, model) && s.ready_model_id().is_some())
+            .min_by_key(|s| s.inflight.load(Ordering::SeqCst))?;
+        chosen.inflight.fetch_add(1, Ordering::SeqCst);
+        Some(Lease {
+            server: chosen.clone(),
+        })
+    }
+}
+
+impl Server {
+    fn started(port: u16, model: &str, child: tokio::process::Child) -> Self {
+        Server {
             port,
             requested: model.to_string(),
-            model_id: model_id.clone(),
+            model_id: StdMutex::new(None),
+            inflight: AtomicUsize::new(0),
             _child: Some(child),
-        });
-        Ok(Endpoint {
-            base_url: base(port),
-            model_id,
-        })
+        }
+    }
+    fn adopted(port: u16, model: &str) -> Self {
+        Server {
+            port,
+            requested: model.to_string(),
+            model_id: StdMutex::new(None),
+            inflight: AtomicUsize::new(0),
+            _child: None,
+        }
     }
 }
 
@@ -265,24 +403,4 @@ async fn spawn_server(model: &str, port: u16) -> anyhow::Result<tokio::process::
         .spawn()
         .map_err(|e| anyhow!("failed to start rapid-mlx serve: {e}"))?;
     Ok(child)
-}
-
-/// Poll until the server reports a model, up to a generous timeout for first-run downloads.
-async fn wait_ready(port: u16, status: &StatusFn<'_>) -> anyhow::Result<String> {
-    let max = Duration::from_secs(60 * 30); // 30 min budget for big downloads
-    let start = std::time::Instant::now();
-    let mut tick = 0u64;
-    loop {
-        if let Some(id) = probe_ready(port).await {
-            return Ok(id);
-        }
-        if start.elapsed() > max {
-            return Err(anyhow!("timed out after {:?}", start.elapsed()));
-        }
-        tick += 1;
-        if tick % 3 == 0 {
-            status(format!("Loading model… ({}s)", start.elapsed().as_secs()));
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
 }

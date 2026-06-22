@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Context};
 use base64::Engine;
+use futures::stream::StreamExt;
 use serde_json::{json, Value};
 
 use crate::config::{OverviewLength, Settings};
@@ -30,6 +31,9 @@ const SINGLE_PASS_LIMIT: usize = 24_000;
 const CHUNK_CHARS: usize = 8_000;
 /// Token budget for each per-chunk "map" summary (kept small; these are terse).
 const MAP_MAX_TOKENS: u32 = 320;
+/// How many per-chunk "map" summaries to have in flight at once. Bounded: they all hit
+/// one server (the job's lease), so this mainly overlaps host-side gaps, not GPU compute.
+const MAP_CONCURRENCY: usize = 3;
 
 /// Low-level chat call honoring the configured `max_tokens`.
 async fn chat(endpoint: &Endpoint, content: Value, settings: &Settings) -> anyhow::Result<String> {
@@ -202,31 +206,56 @@ Title: {title}\nChannel: {channel}{chapters}\n\nTranscript:\n{transcript}",
         return out;
     }
 
-    // Map: summarize each window on its own.
+    // Map: summarize each window on its own. The per-chunk calls are independent, so we
+    // fan them out (bounded) instead of awaiting one at a time — this fills the host-side
+    // gaps between requests even when they land on the same server.
     let chunks = chunk_cues(cues, CHUNK_CHARS);
     let n = chunks.len();
-    let mut summaries: Vec<String> = Vec::new();
-    for (i, ch) in chunks.iter().enumerate() {
-        progress(i, n);
-        let prompt = format!(
-            "This is part {idx}/{n} of a media transcript, covering {a}–{b}. \
+    progress(0, n);
+    // Owned per-chunk job tuples (index, start, end, prompt) so the concurrent futures
+    // don't borrow `chunks` — avoids a higher-ranked-lifetime snag with `.map`.
+    let jobs: Vec<(usize, f64, f64, String)> = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, ch)| {
+            let prompt = format!(
+                "This is part {idx}/{n} of a media transcript, covering {a}–{b}. \
 Summarize the key points and any conclusions in 3–5 sentences. Only state what is \
 present in the text; do not speculate.\n\nTranscript:\n{text}",
-            idx = i + 1,
-            n = n,
-            a = ts(ch.start),
-            b = ts(ch.end),
-            text = ch.text,
-        );
-        match chat_inner(endpoint, json!(prompt), settings, MAP_MAX_TOKENS).await {
-            Ok(s) => summaries.push(format!("[{}–{}] {}", ts(ch.start), ts(ch.end), s.trim())),
-            Err(e) => tracing::warn!("transcript chunk {} summary failed: {e:#}", i + 1),
-        }
-    }
-    progress(n, n);
-    if summaries.is_empty() {
+                idx = i + 1,
+                n = n,
+                a = ts(ch.start),
+                b = ts(ch.end),
+                text = ch.text,
+            );
+            (i, ch.start, ch.end, prompt)
+        })
+        .collect();
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let done = &done;
+    let mut indexed: Vec<(usize, String)> = futures::stream::iter(jobs)
+        .map(|(i, start, end, prompt)| async move {
+            let out = match chat_inner(endpoint, json!(prompt), settings, MAP_MAX_TOKENS).await {
+                Ok(s) => Some((i, format!("[{}–{}] {}", ts(start), ts(end), s.trim()))),
+                Err(e) => {
+                    tracing::warn!("transcript chunk {} summary failed: {e:#}", i + 1);
+                    None
+                }
+            };
+            let completed = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            progress(completed, n);
+            out
+        })
+        .buffer_unordered(MAP_CONCURRENCY)
+        .filter_map(|r| async move { r })
+        .collect()
+        .await;
+    if indexed.is_empty() {
         return Ok(String::new());
     }
+    // Restore chronological order (buffer_unordered yields as each completes).
+    indexed.sort_by_key(|(i, _)| *i);
+    let summaries: Vec<String> = indexed.into_iter().map(|(_, s)| s).collect();
 
     // Reduce: synthesize the segment summaries into the final overview.
     let joined = summaries.join("\n\n");

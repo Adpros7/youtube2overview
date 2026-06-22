@@ -195,12 +195,25 @@ async fn run_inner(
                 job.emit(ProgressEvent::progress("model", msg, 0.58)).await;
             });
         };
-        let endpoint = mlx
-            .ensure(&settings.model, settings.mlx_port, &status)
+        // Lease a server from the pool for the duration of inference; the lease releases
+        // its slot on drop so a concurrent job prefers a less-busy server.
+        let lease = mlx
+            .acquire(
+                &settings.model,
+                settings.mlx_port,
+                settings.mlx_servers,
+                &status,
+            )
             .await?;
+        let endpoint = lease.endpoint();
         data.model_used = endpoint.model_id.clone();
 
-        if need_text {
+        // Text and visual overviews are independent calls; run them concurrently so the
+        // GPU-free gaps of one (HTTP, base64, JSON) overlap the other's work.
+        let text_fut = async {
+            if !need_text {
+                return None;
+            }
             reporter.stage("model", "Writing AI overview…", 0.6).await;
             let job_for_text = reporter.clone_job();
             let progress = move |done: usize, total: usize| {
@@ -227,17 +240,35 @@ async fn run_inner(
             )
             .await
             {
-                Ok(t) => data.ai_overview = t,
-                Err(e) => tracing::warn!("text overview failed: {e:#}"),
+                Ok(t) => Some(t),
+                Err(e) => {
+                    tracing::warn!("text overview failed: {e:#}");
+                    None
+                }
             }
-        }
-        if need_visual {
+        };
+        let visual_fut = async {
+            if !need_visual {
+                return None;
+            }
             reporter.stage("model", "Describing visuals…", 0.82).await;
             match infer::visual_overview(&endpoint, settings, &data.meta, &data.frames).await {
-                Ok(t) => data.visual_overview = t,
-                Err(e) => tracing::warn!("visual overview failed: {e:#}"),
+                Ok(t) => Some(t),
+                Err(e) => {
+                    tracing::warn!("visual overview failed: {e:#}");
+                    None
+                }
             }
+        };
+
+        let (text_res, visual_res) = tokio::join!(text_fut, visual_fut);
+        if let Some(t) = text_res {
+            data.ai_overview = t;
         }
+        if let Some(t) = visual_res {
+            data.visual_overview = t;
+        }
+        drop(lease);
     }
 
     reporter.stage("assemble", "Assembling output…", 0.95).await;
