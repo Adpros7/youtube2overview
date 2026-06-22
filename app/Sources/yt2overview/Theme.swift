@@ -21,7 +21,7 @@ struct GlassCard<Content: View>: View {
         content()
             .padding(padding)
             .glassEffect(
-                .regular,
+                .regular.interactive(),
                 in: .rect(cornerRadius: corner)
             )
             .overlay(
@@ -34,6 +34,6 @@ struct GlassCard<Content: View>: View {
 extension View {
     /// Apply a glass surface inline.
     func glassPanel(corner: CGFloat = Theme.controlCorner) -> some View {
-        self.glassEffect(.regular, in: .rect(cornerRadius: corner))
+        self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: corner))
     }
 }

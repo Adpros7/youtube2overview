@@ -9,23 +9,29 @@ struct MicaBackground: View {
         ZStack {
             VisualEffectView(material: .underWindowBackground, blending: .behindWindow)
 
-            // Color blooms that slowly drift, giving the mica its depth + tint.
+            // Crisp, bright color orbs that slowly drift. Kept sharp (low blur) on
+            // purpose: the glass surfaces above need high-frequency content with
+            // real edges to bend, or the native lensing/refraction is invisible.
             GeometryReader { geo in
                 ZStack {
-                    bloom(Theme.accent.opacity(0.45), 0.62)
-                        .offset(x: drift ? -geo.size.width * 0.22 : -geo.size.width * 0.30,
-                                y: drift ? -geo.size.height * 0.20 : -geo.size.height * 0.28)
-                    bloom(Theme.violet.opacity(0.40), 0.70)
-                        .offset(x: geo.size.width * 0.34,
-                                y: drift ? geo.size.height * 0.10 : geo.size.height * 0.22)
-                    bloom(Theme.teal.opacity(0.30), 0.55)
-                        .offset(x: drift ? geo.size.width * 0.10 : geo.size.width * 0.02,
-                                y: geo.size.height * 0.40)
+                    bloom(Theme.accent.opacity(0.85), 0.50)
+                        .offset(x: drift ? -geo.size.width * 0.20 : -geo.size.width * 0.32,
+                                y: drift ? -geo.size.height * 0.18 : -geo.size.height * 0.30)
+                    bloom(Theme.violet.opacity(0.80), 0.58)
+                        .offset(x: drift ? geo.size.width * 0.30 : geo.size.width * 0.40,
+                                y: drift ? geo.size.height * 0.06 : geo.size.height * 0.24)
+                    bloom(Theme.teal.opacity(0.70), 0.42)
+                        .offset(x: drift ? geo.size.width * 0.12 : -geo.size.width * 0.02,
+                                y: drift ? geo.size.height * 0.44 : geo.size.height * 0.34)
+                    // Small bright accent so glass edges show a visible lens.
+                    bloom(.white.opacity(0.35), 0.20)
+                        .offset(x: drift ? geo.size.width * 0.18 : geo.size.width * 0.05,
+                                y: drift ? -geo.size.height * 0.02 : geo.size.height * 0.12)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
-                .blur(radius: 80)
+                .blur(radius: 24)
             }
-            .opacity(0.9)
+            .opacity(0.95)
 
             // Subtle top-down darkening keeps content legible.
             LinearGradient(
