@@ -28,6 +28,7 @@ fi
 
 SHA="$(git -C "$ROOT" rev-parse --short=12 HEAD)"
 FULL_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+COMMIT_MSG="$(git -C "$ROOT" log -1 --pretty=%B HEAD)"
 
 semver_pattern='^v?[0-9]+\.[0-9]+\.[0-9]+$'
 
@@ -140,7 +141,7 @@ if [[ "$UPLOAD_GITHUB" == "1" ]]; then
             "$DMG_TAG" \
             "$SOURCE_TAR_TAG" \
             --title "yt2overview ${TAG}" \
-            --notes "Automated commit release for ${FULL_SHA}."
+            --notes "${COMMIT_MSG}"$'\n\n'"Automated commit release for ${FULL_SHA}."
     fi
     echo "GitHub Release ready: ${TAG}"
 fi
