@@ -3,6 +3,7 @@
 A macOS-native app that turns media links and local audio/video files into copiable,
 AI-ready text: **full transcript · top comments when available · visual (frame)
 overview · AI text overview · chapters**, all generated locally on Apple Silicon.
+This is a personal project, but anyone is free to use
 
 > Paste a link, pick files, or drag in media like `.m4a`, `.mp4`, `.mp3`, `.mov`, or `.wav`
 > → get one clean document — a **Readable** view *and* an **AI-optimized** payload
