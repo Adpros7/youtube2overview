@@ -84,6 +84,10 @@ pub struct Settings {
     pub whisper_model: String,
     /// Force a specific server port; 0 = auto (reuse running or pick free).
     pub mlx_port: u16,
+    /// Size of the rapid-mlx server pool (servers serving the model, each on its own
+    /// port). Concurrent jobs are load-balanced across them. >1 trades extra memory and
+    /// GPU contention for overlap of host-side gaps; ignored when `mlx_port` is forced.
+    pub mlx_servers: u16,
     pub temperature: f32,
     pub max_tokens: u32,
 
@@ -121,6 +125,7 @@ impl Default for Settings {
             model: "mlx-community/gemma-4-12b-it-4bit".to_string(),
             whisper_model: "mlx-community/whisper-large-v3-turbo".to_string(),
             mlx_port: 0,
+            mlx_servers: 2,
             temperature: 0.4,
             max_tokens: 1536,
             include_comments: true,
