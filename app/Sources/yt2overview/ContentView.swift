@@ -138,7 +138,6 @@ struct ContentView: View {
                     }
                     .buttonStyle(.glass)
                     .help("Upload local audio or video files")
-                    .disabled(model.isBusy)
                     Button {
                         model.generate()
                     } label: {
@@ -173,6 +172,14 @@ struct ContentView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 }
+                if !model.localFileJobs.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(model.localFileJobs) { job in
+                            localFileJobRow(job)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
@@ -187,6 +194,43 @@ struct ContentView: View {
                 model.useLocalFiles(urls)
             }
         }
+    }
+
+    @ViewBuilder private func localFileJobRow(_ job: LocalFileJob) -> some View {
+        HStack(spacing: 7) {
+            switch job.status {
+            case .queued:
+                Image(systemName: "clock").foregroundStyle(.secondary)
+                Text("Queued")
+            case .running(_, let message, let progress):
+                ProgressView(value: progress).frame(width: 44)
+                Text(message)
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Complete")
+            case .cancelled:
+                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                Text("Cancelled")
+            case .failed(let message):
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+                Text(message)
+            }
+            Text(job.fileURL.lastPathComponent)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            if case .queued = job.status {
+                Button("Cancel") { model.cancelLocalFileJob(job.id) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            } else if case .running = job.status {
+                Button("Cancel") { model.cancelLocalFileJob(job.id) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
     }
 
     /// Accept dropped audio/video file URLs and add them to the processing queue.

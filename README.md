@@ -45,7 +45,7 @@ Everything runs locally. No API keys. No cloud.
    - uses yt-dlp for web media metadata, chapters, top-N comments, and captions when available,
    - uses ffprobe/ffmpeg for local audio/video files such as `.m4a`, `.mp4`, `.mp3`, `.mov`, and `.wav`,
    - transcribes local media with embedded captions first, then normalized local audio via mlx-whisper when needed,
-   - processes multiple added files through the local queue and saves each completed result to History,
+   - processes multiple added files two at a time and saves each completed result to History,
    - extracts keyframes from video sources when visual overview is enabled,
    - reuses a running/cached **Gemma 4** server or serves one on a free port (with `--mllm`
      for vision), and asks it for a text overview + a visual overview,

@@ -144,6 +144,23 @@ struct ProgressEvent: Codable {
     var kind: String
 }
 
+// MARK: - Local batch processing
+
+enum LocalFileJobStatus: Equatable {
+    case queued
+    case running(stage: String, message: String, progress: Double)
+    case done
+    case cancelled
+    case failed(String)
+}
+
+struct LocalFileJob: Identifiable {
+    let id = UUID()
+    let fileURL: URL
+    var backendJobID: String?
+    var status: LocalFileJobStatus = .queued
+}
+
 // MARK: - JSON helpers
 
 enum JSON {

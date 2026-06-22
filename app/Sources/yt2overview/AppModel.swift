@@ -20,7 +20,8 @@ final class AppModel {
     var result: JobResult?
     var cachedModels: [CachedModel] = []
     var showSettings = false
-    var pendingLocalFiles: [URL] = []
+    private var pendingLocalFileJobIDs: [UUID] = []
+    var localFileJobs: [LocalFileJob] = []
     var batchTotal = 0
     var batchCompleted = 0
 
@@ -32,10 +33,14 @@ final class AppModel {
     var showHistory = false
     private let backend = BackendClient()
     private var started = false
+    private var activeLocalFileJobIDs = Set<UUID>()
+    private var localFileTasks: [UUID: Task<Void, Never>] = [:]
+    private let maxConcurrentLocalFileJobs = 2
 
     var hasResult: Bool { result != nil }
 
     var isBusy: Bool {
+        if !activeLocalFileJobIDs.isEmpty { return true }
         switch phase {
         case .starting, .running: return true
         default: return false
@@ -69,7 +74,8 @@ final class AppModel {
     func generate() {
         let target = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !target.isEmpty, !isBusy else { return }
-        pendingLocalFiles.removeAll()
+        pendingLocalFileJobIDs.removeAll()
+        localFileJobs.removeAll()
         batchTotal = 0
         batchCompleted = 0
         startJob(target, advancesBatch: false)
@@ -86,27 +92,38 @@ final class AppModel {
         useLocalFiles([fileURL])
     }
 
-    /// Add one or more locally-picked/dropped media files to the processing queue.
+    /// Add one or more locally-picked/dropped media files to a bounded parallel batch.
     func useLocalFiles(_ fileURLs: [URL]) {
         let files = fileURLs.filter { $0.isFileURL }
         guard !files.isEmpty else { return }
 
-        if !isBusy && pendingLocalFiles.isEmpty {
+        if pendingLocalFileJobIDs.isEmpty && activeLocalFileJobIDs.isEmpty {
             batchCompleted = 0
             batchTotal = files.count
+            localFileJobs.removeAll()
         } else {
             batchTotal += files.count
         }
 
-        pendingLocalFiles.append(contentsOf: files)
-        startNextQueuedLocalFile()
+        let jobs = files.map { LocalFileJob(fileURL: $0) }
+        localFileJobs.append(contentsOf: jobs)
+        pendingLocalFileJobIDs.append(contentsOf: jobs.map(\.id))
+        startQueuedLocalFiles()
     }
 
-    private func startNextQueuedLocalFile() {
-        guard !isBusy, !pendingLocalFiles.isEmpty else { return }
-        let fileURL = pendingLocalFiles.removeFirst()
-        url = fileURL.path
-        startJob(fileURL.path, advancesBatch: true)
+    private func startQueuedLocalFiles() {
+        while activeLocalFileJobIDs.count < maxConcurrentLocalFileJobs,
+              !pendingLocalFileJobIDs.isEmpty {
+            let id = pendingLocalFileJobIDs.removeFirst()
+            guard let index = localFileJobs.firstIndex(where: { $0.id == id }) else { continue }
+            let fileURL = localFileJobs[index].fileURL
+            localFileJobs[index].status = .running(
+                stage: "start", message: "Starting…", progress: 0.02
+            )
+            activeLocalFileJobIDs.insert(id)
+            let task = Task { await runLocalFileJob(id: id, target: fileURL.path) }
+            localFileTasks[id] = task
+        }
     }
 
     /// Filename to show when the current input is a local file (vs. a web URL).
@@ -120,17 +137,15 @@ final class AppModel {
     var batchLabel: String? {
         guard batchTotal > 1 else { return nil }
         if isBusy {
-            let current = min(batchCompleted + 1, batchTotal)
-            let remaining = max(batchTotal - current, 0)
-            return remaining == 0
-                ? "Processing \(current) of \(batchTotal)"
-                : "Processing \(current) of \(batchTotal) · \(remaining) queued"
+            let active = activeLocalFileJobIDs.count
+            let queued = pendingLocalFileJobIDs.count
+            return "\(active) processing in parallel · \(queued) queued"
         }
         if batchCompleted >= batchTotal {
             return "Processed \(batchCompleted) files"
         }
-        if !pendingLocalFiles.isEmpty {
-            return "\(pendingLocalFiles.count) files queued"
+        if !pendingLocalFileJobIDs.isEmpty {
+            return "\(pendingLocalFileJobIDs.count) files queued"
         }
         return nil
     }
@@ -165,7 +180,75 @@ final class AppModel {
             if advancesBatch {
                 batchCompleted += 1
             }
-            startNextQueuedLocalFile()
+            startQueuedLocalFiles()
+        }
+    }
+
+    private func runLocalFileJob(id: UUID, target: String) async {
+        defer {
+            activeLocalFileJobIDs.remove(id)
+            localFileTasks.removeValue(forKey: id)
+            startQueuedLocalFiles()
+        }
+
+        do {
+            if backend.baseURL == nil { try await backend.start() }
+            await provisioner.ensureReady()
+            let jobId = try await backend.process(url: target, settings: settings)
+            guard let index = localFileJobs.firstIndex(where: { $0.id == id }) else { return }
+            localFileJobs[index].backendJobID = jobId
+            if Task.isCancelled {
+                try? await backend.cancel(jobId: jobId)
+                localFileJobs[index].status = .cancelled
+                return
+            }
+            for try await ev in backend.events(jobId: jobId) {
+                guard let index = localFileJobs.firstIndex(where: { $0.id == id }) else { return }
+                if ev.kind == "error" {
+                    localFileJobs[index].status = .failed(ev.message)
+                    return
+                }
+                if ev.kind != "done" {
+                    localFileJobs[index].status = .running(
+                        stage: ev.stage, message: ev.message, progress: ev.progress
+                    )
+                }
+            }
+            guard let index = localFileJobs.firstIndex(where: { $0.id == id }) else { return }
+            if let res = try await backend.result(jobId: jobId) {
+                localFileJobs[index].status = .done
+                result = res
+                phase = .done
+                batchCompleted += 1
+                history.add(url: target, result: res)
+            } else {
+                localFileJobs[index].status = .failed("No result produced.")
+            }
+        } catch {
+            if let index = localFileJobs.firstIndex(where: { $0.id == id }) {
+                localFileJobs[index].status = Task.isCancelled
+                    ? .cancelled
+                    : .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func cancelLocalFileJob(_ id: UUID) {
+        guard let index = localFileJobs.firstIndex(where: { $0.id == id }) else { return }
+        switch localFileJobs[index].status {
+        case .queued:
+            pendingLocalFileJobIDs.removeAll { $0 == id }
+            localFileJobs[index].status = .cancelled
+        case .running:
+            localFileJobs[index].status = .running(
+                stage: "cancelling", message: "Cancelling…", progress: 0
+            )
+            if let jobId = localFileJobs[index].backendJobID {
+                Task { try? await backend.cancel(jobId: jobId) }
+            }
+            localFileTasks[id]?.cancel()
+        case .done, .cancelled, .failed:
+            break
         }
     }
 
@@ -180,10 +263,17 @@ final class AppModel {
     func copyAI() { if let r = result { Clipboard.copy(r.outputs.aiPayload) } }
 
     func clear() {
+        for job in localFileJobs {
+            if let jobId = job.backendJobID {
+                Task { try? await backend.cancel(jobId: jobId) }
+            }
+            localFileTasks[job.id]?.cancel()
+        }
         url = ""
         result = nil
         phase = .idle
-        pendingLocalFiles.removeAll()
+        pendingLocalFileJobIDs.removeAll()
+        localFileJobs.removeAll()
         batchTotal = 0
         batchCompleted = 0
     }

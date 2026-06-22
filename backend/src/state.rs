@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::Serialize;
 use tokio::sync::{broadcast, Mutex};
+use tokio::task::AbortHandle;
 
 use crate::mlx::MlxManager;
 use crate::model::JobResult;
@@ -83,27 +84,42 @@ impl Job {
     pub async fn emit(&self, ev: ProgressEvent) {
         {
             let mut inner = self.inner.lock().await;
+            if inner.finished {
+                return;
+            }
             inner.events.push(ev.clone());
         }
         let _ = self.tx.send(ev);
     }
 
     pub async fn complete(&self, result: JobResult) {
-        {
+        let should_send = {
             let mut inner = self.inner.lock().await;
+            if inner.finished {
+                return;
+            }
             inner.result = Some(result);
             inner.finished = true;
-        }
-        self.emit(ProgressEvent::done()).await;
+            let event = ProgressEvent::done();
+            inner.events.push(event.clone());
+            event
+        };
+        let _ = self.tx.send(should_send);
     }
 
     pub async fn fail(&self, message: String) {
-        {
+        let should_send = {
             let mut inner = self.inner.lock().await;
+            if inner.finished {
+                return;
+            }
             inner.error = Some(message.clone());
             inner.finished = true;
-        }
-        self.emit(ProgressEvent::error(message)).await;
+            let event = ProgressEvent::error(message);
+            inner.events.push(event.clone());
+            event
+        };
+        let _ = self.tx.send(should_send);
     }
 
     pub async fn result(&self) -> Option<JobResult> {
@@ -122,6 +138,7 @@ impl Job {
 #[derive(Clone)]
 pub struct AppState {
     jobs: Arc<DashMap<String, Arc<Job>>>,
+    tasks: Arc<DashMap<String, AbortHandle>>,
     pub mlx: Arc<MlxManager>,
 }
 
@@ -129,6 +146,7 @@ impl AppState {
     pub fn new() -> Self {
         AppState {
             jobs: Arc::new(DashMap::new()),
+            tasks: Arc::new(DashMap::new()),
             mlx: MlxManager::new(),
         }
     }
@@ -142,5 +160,21 @@ impl AppState {
 
     pub fn get(&self, id: &str) -> Option<Arc<Job>> {
         self.jobs.get(id).map(|j| j.clone())
+    }
+
+    pub fn track_task(&self, id: String, handle: AbortHandle) {
+        self.tasks.insert(id, handle);
+    }
+
+    /// Mark the job cancelled before aborting its task so event subscribers receive
+    /// a terminal state even when the pipeline is currently blocked in a subprocess.
+    pub async fn cancel(&self, id: &str) -> bool {
+        let Some(job) = self.get(id) else { return false };
+        if job.is_finished().await { return false }
+        job.fail("Cancelled".to_string()).await;
+        if let Some((_, handle)) = self.tasks.remove(id) {
+            handle.abort();
+        }
+        true
     }
 }

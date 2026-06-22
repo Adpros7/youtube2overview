@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures::stream::Stream;
 use serde_json::json;
@@ -21,6 +21,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/models", get(models))
         .route("/process", post(process))
+        .route("/process/:id", delete(cancel))
         .route("/events/:id", get(events))
         .route("/result/:id", get(result))
         .layer(CorsLayer::very_permissive())
@@ -43,8 +44,18 @@ async fn process(
     let job = state.create_job();
     let id = job.id.clone();
     let mlx = state.mlx.clone();
-    tokio::spawn(pipeline::run(job, mlx, ProcessRequest { url, ..req }));
+    let handle = tokio::spawn(pipeline::run(job, mlx, ProcessRequest { url, ..req }));
+    state.track_task(id.clone(), handle.abort_handle());
     Ok(Json(json!({ "job_id": id })))
+}
+
+/// Cancel a running job. The task is aborted after its subscribers receive a terminal event.
+async fn cancel(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<serde_json::Value>> {
+    if state.cancel(&id).await {
+        Ok(Json(json!({ "status": "cancelled" })))
+    } else {
+        Err(AppError::NotFound(format!("active job {id}")))
+    }
 }
 
 /// List locally-cached models (for the first-run picker / settings).

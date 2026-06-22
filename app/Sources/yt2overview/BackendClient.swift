@@ -134,6 +134,16 @@ final class BackendClient: @unchecked Sendable {
         return try JSON.decoder.decode(Resp.self, from: data).jobId
     }
 
+    func cancel(jobId: String) async throws {
+        guard let base = baseURL else { throw BackendError.notReady }
+        var req = URLRequest(url: base.appendingPathComponent("process").appendingPathComponent(jobId))
+        req.httpMethod = "DELETE"
+        let (data, resp) = try await session.data(for: req)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BackendError.http(String(data: data, encoding: .utf8) ?? "cancel failed")
+        }
+    }
+
     /// Stream SSE progress events for a job as an async sequence.
     func events(jobId: String) -> AsyncThrowingStream<ProgressEvent, Error> {
         let base = baseURL
