@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let window = NSApp.windows.first {
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
+            window.isOpaque = false
             window.backgroundColor = .clear
         }
     }
