@@ -8,8 +8,8 @@ echo "▸ Building Rust backend (release)…"
 ( cd "$ROOT/backend" && cargo build --release )
 
 echo "▸ Building SwiftUI app (release)…"
-( cd "$ROOT/app" && swift build -c release )
+( cd "$ROOT/app" && swift build -c release --jobs $(sysctl -n hw.ncpu))
 
 echo "✓ Build complete."
 echo "  backend: $ROOT/backend/target/release/yt2overview-backend"
-echo "  app:     $(cd "$ROOT/app" && swift build -c release --show-bin-path)/yt2overview"
+# echo "  app:     $(cd "$ROOT/app" && swift build -c release --show-bin-path)/yt2overview"
